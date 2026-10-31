@@ -1,0 +1,8 @@
+# build / IDE
+.gradle/
+build/
+run/
+.idea/
+*.iml
+out/
+bin/

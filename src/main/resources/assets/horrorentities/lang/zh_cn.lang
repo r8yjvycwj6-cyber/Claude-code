@@ -1,0 +1,24 @@
+itemGroup.horrorentities.main=恐怖实体
+
+item.horrorentities.nightmare_shard.name=梦魇碎片
+item.horrorentities.warding_charm.name=守护符
+item.horrorentities.greater_warding_charm.name=高阶守护符
+
+entity.horrorentities.stalker.name=潜行者
+entity.horrorentities.hollow.name=空洞之影
+entity.horrorentities.mimic.name=拟态者
+entity.horrorentities.gaunt.name=瘦骨者
+entity.horrorentities.shade.name=暗影
+
+chat.horrorentities.whisper.1=别回头。
+chat.horrorentities.whisper.2=我从这里就能看见你的基地。
+chat.horrorentities.whisper.3=这里不止你一个人。
+chat.horrorentities.whisper.4=抬头看。
+chat.horrorentities.whisper.5=它还跟着你。
+chat.horrorentities.whisper.6=你为什么停下了？
+chat.horrorentities.whisper.7=看看门后面。
+chat.horrorentities.whisper.8=你刚才移开了视线。那是个错误。
+
+commands.horrorentities.horror.usage=/horror dread [数值] | spawn <stalker|hollow|mimic|gaunt|shade> [距离] | event <ambient|chat|torch> | clear
+commands.horrorentities.horror.no_player=没有可作为目标的玩家
+commands.horrorentities.horror.spawn_failed=找不到合适的生成位置

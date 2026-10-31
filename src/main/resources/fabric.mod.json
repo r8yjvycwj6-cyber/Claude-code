@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "horrorentities",
+  "version": "${version}",
+  "name": "Horror Entities",
+  "description": "Five horror entities built on what creepypasta and horror-game monsters have in common: watching, stalking, darkness and silence. Includes a dread system that decides when something happens.",
+  "authors": ["Horror Entities contributors"],
+  "icon": "assets/horrorentities/icon.png",
+  "environment": "*",
+  "mixins": ["horrorentities.mixins.json"],
+  "entrypoints": {
+    "main": ["com.horrorentities.HorrorEntities"],
+    "client": ["com.horrorentities.client.HorrorEntitiesClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "minecraft": "1.12.2",
+    "legacy-fabric-api": "*"
+  }
+}
