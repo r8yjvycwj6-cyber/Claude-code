@@ -229,17 +229,17 @@ def icon():
 
 def main():
     (OUT / "entity").mkdir(parents=True, exist_ok=True)
-    (OUT / "items").mkdir(parents=True, exist_ok=True)
+    (OUT / "item").mkdir(parents=True, exist_ok=True)
 
     for name, fn in ENTITIES.items():
         skin, eyes = fn(random.Random(name))
         skin.save(OUT / "entity" / f"{name}.png")
         eyes.save(OUT / "entity" / f"{name}_eyes.png")
 
-    shard().save(OUT / "items" / "nightmare_shard.png")
-    charm(False).save(OUT / "items" / "warding_charm.png")
-    charm(True).save(OUT / "items" / "greater_warding_charm.png")
-    icon().save(OUT.parent / "icon.png")
+    shard().save(OUT / "item" / "nightmare_shard.png")
+    charm(False).save(OUT / "item" / "warding_charm.png")
+    charm(True).save(OUT / "item" / "greater_warding_charm.png")
+    icon().save(OUT.parent.parent.parent / "icon.png")
     print("textures written to", OUT)
 
 

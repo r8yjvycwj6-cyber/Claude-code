@@ -1,38 +1,59 @@
 package com.horrorentities.registry;
 
+import java.util.function.Supplier;
+
+import com.horrorentities.HorrorEntities;
 import com.horrorentities.entity.GauntEntity;
 import com.horrorentities.entity.HollowEntity;
 import com.horrorentities.entity.MimicEntity;
 import com.horrorentities.entity.ShadeEntity;
 import com.horrorentities.entity.StalkerEntity;
 
-import net.legacyfabric.fabric.api.entity.EntityHelper;
-import net.legacyfabric.fabric.api.registry.v2.RegistryHelper;
-import net.legacyfabric.fabric.api.registry.v2.RegistryIds;
-import net.legacyfabric.fabric.api.util.Identifier;
-import net.minecraft.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobCategory;
+import net.minecraftforge.event.entity.EntityAttributeCreationEvent;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
 
 public final class ModEntities {
-	public static final String STALKER = "stalker";
-	public static final String HOLLOW = "hollow";
-	public static final String MIMIC = "mimic";
-	public static final String GAUNT = "gaunt";
-	public static final String SHADE = "shade";
+	public static final DeferredRegister<EntityType<?>> ENTITIES =
+			DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, HorrorEntities.MOD_ID);
+
+	public static final RegistryObject<EntityType<StalkerEntity>> STALKER = register("stalker", StalkerEntity::new, 0.6F, 2.7F);
+	public static final RegistryObject<EntityType<HollowEntity>> HOLLOW = register("hollow", HollowEntity::new, 0.6F, 1.95F);
+	public static final RegistryObject<EntityType<MimicEntity>> MIMIC = register("mimic", MimicEntity::new, 0.6F, 1.95F);
+	public static final RegistryObject<EntityType<GauntEntity>> GAUNT = register("gaunt", GauntEntity::new, 0.6F, 2.0F);
+	public static final RegistryObject<EntityType<ShadeEntity>> SHADE = register("shade", ShadeEntity::new, 0.6F, 1.95F);
 
 	private ModEntities() {
 	}
 
-	public static void register() {
-		add(STALKER, StalkerEntity.class, 0x0b0b0f, 0xd9d9d9);
-		add(HOLLOW, HollowEntity.class, 0x3a6ea5, 0xffffff);
-		add(MIMIC, MimicEntity.class, 0x6b6a4a, 0xb22222);
-		add(GAUNT, GauntEntity.class, 0x4d4d4d, 0xe8e0a0);
-		add(SHADE, ShadeEntity.class, 0x000000, 0x5b2a86);
+	private static <T extends net.minecraft.world.entity.Entity> RegistryObject<EntityType<T>> register(
+			String name, EntityType.EntityFactory<T> factory, float width, float height) {
+		return ENTITIES.register(name, () -> EntityType.Builder.of(factory, MobCategory.MONSTER)
+				.sized(width, height)
+				.clientTrackingRange(10)
+				.build(HorrorEntities.MOD_ID + ":" + name));
 	}
 
-	private static void add(String name, Class<? extends Entity> type, int primary, int secondary) {
-		Identifier id = ModItems.id(name);
-		RegistryHelper.register(RegistryIds.ENTITY_TYPES, id, type);
-		EntityHelper.registerSpawnEgg(id, primary, secondary);
+	/** Entity type by the short name used in commands, or null. */
+	public static Supplier<? extends EntityType<?>> byName(String name) {
+		return switch (name) {
+			case "stalker" -> STALKER;
+			case "hollow" -> HOLLOW;
+			case "mimic" -> MIMIC;
+			case "gaunt" -> GAUNT;
+			case "shade" -> SHADE;
+			default -> null;
+		};
+	}
+
+	public static void onAttributes(EntityAttributeCreationEvent event) {
+		event.put(STALKER.get(), StalkerEntity.createAttributes().build());
+		event.put(HOLLOW.get(), HollowEntity.createAttributes().build());
+		event.put(MIMIC.get(), MimicEntity.createAttributes().build());
+		event.put(GAUNT.get(), GauntEntity.createAttributes().build());
+		event.put(SHADE.get(), ShadeEntity.createAttributes().build());
 	}
 }

@@ -1,85 +1,43 @@
 package com.horrorentities;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Properties;
+import net.minecraftforge.common.ForgeConfigSpec;
 
-import net.fabricmc.loader.api.FabricLoader;
-
-/** Tiny properties-file config, written with defaults on first launch. */
+/** Common config, written to config/horrorentities-common.toml. */
 public final class HorrorConfig {
-	/** Master switch for the whole dread director (ambient events + spawns). */
-	public static boolean enableDirector = true;
-	/** Multiplies how fast dread builds up. 0 disables dread gain. */
-	public static double dreadGainMultiplier = 1.0;
-	/** Multiplies how often events fire (higher = more frequent). */
-	public static double eventFrequency = 1.0;
-	public static boolean enableFakeChat = true;
-	public static boolean enableAmbientSounds = true;
-	public static boolean enableTorchSnuffing = true;
-	/** Whether the Hollow One may leave small netherrack+torch shrines behind. */
-	public static boolean enableTraces = true;
-	/** Maximum horror entities alive near one player at once. */
-	public static int maxEntitiesPerPlayer = 2;
+	public static final ForgeConfigSpec SPEC;
+
+	public static final ForgeConfigSpec.BooleanValue ENABLE_DIRECTOR;
+	public static final ForgeConfigSpec.DoubleValue DREAD_GAIN_MULTIPLIER;
+	public static final ForgeConfigSpec.DoubleValue EVENT_FREQUENCY;
+	public static final ForgeConfigSpec.BooleanValue ENABLE_FAKE_CHAT;
+	public static final ForgeConfigSpec.BooleanValue ENABLE_AMBIENT_SOUNDS;
+	public static final ForgeConfigSpec.BooleanValue ENABLE_TORCH_SNUFFING;
+	public static final ForgeConfigSpec.BooleanValue ENABLE_TRACES;
+	public static final ForgeConfigSpec.IntValue MAX_ENTITIES_PER_PLAYER;
+
+	static {
+		ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
+
+		ENABLE_DIRECTOR = b.comment("Master switch for the dread director (ambient events and spawns).")
+				.define("enableDirector", true);
+		DREAD_GAIN_MULTIPLIER = b.comment("Multiplies how fast dread builds up. 0 disables dread gain.")
+				.defineInRange("dreadGainMultiplier", 1.0, 0.0, 20.0);
+		EVENT_FREQUENCY = b.comment("Multiplies how often events fire (higher = more frequent).")
+				.defineInRange("eventFrequency", 1.0, 0.1, 20.0);
+		ENABLE_FAKE_CHAT = b.comment("Fake join/leave messages and whispers in chat.")
+				.define("enableFakeChat", true);
+		ENABLE_AMBIENT_SOUNDS = b.comment("Footsteps, doors and other sounds behind the player.")
+				.define("enableAmbientSounds", true);
+		ENABLE_TORCH_SNUFFING = b.comment("Director events and the Shade may snuff out nearby torches (they drop as items).")
+				.define("enableTorchSnuffing", true);
+		ENABLE_TRACES = b.comment("The Hollow One may leave a netherrack block topped with a redstone torch behind.")
+				.define("enableTraces", true);
+		MAX_ENTITIES_PER_PLAYER = b.comment("Maximum horror entities alive near one player at once.")
+				.defineInRange("maxEntitiesPerPlayer", 2, 0, 20);
+
+		SPEC = b.build();
+	}
 
 	private HorrorConfig() {
-	}
-
-	public static void load() {
-		Path file = FabricLoader.getInstance().getConfigDir().resolve("horrorentities.properties");
-		Properties props = new Properties();
-
-		if (Files.exists(file)) {
-			try (InputStream in = Files.newInputStream(file)) {
-				props.load(in);
-			} catch (IOException e) {
-				HorrorEntities.LOGGER.warn("Could not read {}: {}", file, e.toString());
-			}
-		}
-
-		enableDirector = bool(props, "enableDirector", enableDirector);
-		dreadGainMultiplier = number(props, "dreadGainMultiplier", dreadGainMultiplier);
-		eventFrequency = number(props, "eventFrequency", eventFrequency);
-		enableFakeChat = bool(props, "enableFakeChat", enableFakeChat);
-		enableAmbientSounds = bool(props, "enableAmbientSounds", enableAmbientSounds);
-		enableTorchSnuffing = bool(props, "enableTorchSnuffing", enableTorchSnuffing);
-		enableTraces = bool(props, "enableTraces", enableTraces);
-		maxEntitiesPerPlayer = (int) number(props, "maxEntitiesPerPlayer", maxEntitiesPerPlayer);
-
-		try {
-			Files.createDirectories(file.getParent());
-
-			try (OutputStream out = Files.newOutputStream(file)) {
-				props.store(out, "Horror Entities config");
-			}
-		} catch (IOException e) {
-			HorrorEntities.LOGGER.warn("Could not write {}: {}", file, e.toString());
-		}
-	}
-
-	private static boolean bool(Properties props, String key, boolean def) {
-		String value = props.getProperty(key);
-		boolean result = value == null ? def : Boolean.parseBoolean(value.trim());
-		props.setProperty(key, Boolean.toString(result));
-		return result;
-	}
-
-	private static double number(Properties props, String key, double def) {
-		double result = def;
-		String value = props.getProperty(key);
-
-		if (value != null) {
-			try {
-				result = Double.parseDouble(value.trim());
-			} catch (NumberFormatException ignored) {
-				// fall back to the default
-			}
-		}
-
-		props.setProperty(key, Double.toString(result));
-		return result;
 	}
 }

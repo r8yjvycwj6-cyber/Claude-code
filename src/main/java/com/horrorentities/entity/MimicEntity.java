@@ -2,20 +2,23 @@ package com.horrorentities.entity;
 
 import com.horrorentities.director.DreadDirector;
 
-import net.minecraft.client.sound.SoundCategory;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.ai.goal.FollowTargetGoal;
-import net.minecraft.entity.ai.goal.LookAroundGoal;
-import net.minecraft.entity.ai.goal.MeleeAttackGoal;
-import net.minecraft.entity.ai.goal.RevengeGoal;
-import net.minecraft.entity.ai.goal.SwimGoal;
-import net.minecraft.entity.ai.goal.WanderAroundGoal;
-import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.sound.Sound;
-import net.minecraft.sound.Sounds;
-import net.minecraft.world.World;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.goal.FloatGoal;
+import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
+import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
+import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
+import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 
 /**
  * The Mimic stands motionless in the dark and imitates the animals and villagers you would expect
@@ -28,29 +31,27 @@ public class MimicEntity extends HorrorEntity {
 	private boolean revealed;
 	private int lureCooldown = 60;
 
-	public MimicEntity(World world) {
-		super(world);
-		this.setBounds(0.6F, 1.95F);
-		this.setAiDisabled(true);
+	public MimicEntity(EntityType<? extends MimicEntity> type, Level level) {
+		super(type, level);
+		this.setNoAi(true);
+	}
+
+	public static AttributeSupplier.Builder createAttributes() {
+		return Monster.createMonsterAttributes()
+				.add(Attributes.MAX_HEALTH, 30.0)
+				.add(Attributes.MOVEMENT_SPEED, 0.3)
+				.add(Attributes.ATTACK_DAMAGE, 6.0)
+				.add(Attributes.FOLLOW_RANGE, 40.0);
 	}
 
 	@Override
-	protected void initGoals() {
-		this.goals.add(0, new SwimGoal(this));
-		this.goals.add(2, new MeleeAttackGoal(this, 1.0, true));
-		this.goals.add(7, new WanderAroundGoal(this, 0.8));
-		this.goals.add(8, new LookAroundGoal(this));
-		this.attackGoals.add(1, new RevengeGoal(this, true));
-		this.attackGoals.add(2, new FollowTargetGoal<PlayerEntity>(this, PlayerEntity.class, 10, false, false, this.targetFilter()));
-	}
-
-	@Override
-	protected void initializeAttributes() {
-		super.initializeAttributes();
-		this.getAttributeContainer().get(EntityAttributes.GENERIC_MAX_HEALTH).setBaseValue(30.0);
-		this.getAttributeContainer().get(EntityAttributes.GENERIC_MOVEMENT_SPEED).setBaseValue(0.3);
-		this.getAttributeContainer().get(EntityAttributes.GENERIC_ATTACK_DAMAGE).setBaseValue(6.0);
-		this.getAttributeContainer().get(EntityAttributes.GENERIC_FOLLOW_RANGE).setBaseValue(40.0);
+	protected void registerGoals() {
+		this.goalSelector.addGoal(0, new FloatGoal(this));
+		this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.0, true));
+		this.goalSelector.addGoal(7, new WaterAvoidingRandomStrollGoal(this, 0.8));
+		this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+		this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+		this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, 10, false, false, this.targetFilter()));
 	}
 
 	public boolean isRevealed() {
@@ -61,20 +62,20 @@ public class MimicEntity extends HorrorEntity {
 	public void tick() {
 		super.tick();
 
-		if (this.world.isClient || this.removed || this.revealed) {
+		if (this.level().isClientSide || this.isRemoved() || this.revealed) {
 			return;
 		}
 
-		PlayerEntity player = this.closestSurvivalPlayer(48.0);
+		Player player = this.closestSurvivalPlayer(48.0);
 
 		if (player == null) {
 			return;
 		}
 
-		this.lookAtEntity(player, 30.0F, 30.0F);
-		this.headYaw = this.yaw;
+		this.getLookControl().setLookAt(player, 30.0F, 30.0F);
+		this.getLookControl().tick();
 
-		if (this.squaredDistanceTo(player) < REVEAL_RANGE * REVEAL_RANGE && !this.isRepelledBy(player)) {
+		if (this.distanceToSqr(player) < REVEAL_RANGE * REVEAL_RANGE && !this.isRepelledBy(player)) {
 			this.reveal(player);
 			return;
 		}
@@ -86,65 +87,66 @@ public class MimicEntity extends HorrorEntity {
 	}
 
 	private void lure() {
-		Sound[] lures = {
-			Sounds.ENTITY_COW_AMBIENT, Sounds.ENTITY_PIG_AMBIENT, Sounds.ENTITY_SHEEP_AMBIENT,
-			Sounds.ENTITY_CHICKEN_AMBIENT, Sounds.ENTITY_VILLAGER_AMBIENT, Sounds.ENTITY_VILLAGER_YES
+		SoundEvent[] lures = {
+			SoundEvents.COW_AMBIENT, SoundEvents.PIG_AMBIENT, SoundEvents.SHEEP_AMBIENT,
+			SoundEvents.CHICKEN_AMBIENT, SoundEvents.VILLAGER_AMBIENT, SoundEvents.VILLAGER_YES
 		};
-		Sound pick = lures[this.random.nextInt(lures.length)];
+		SoundEvent pick = lures[this.random.nextInt(lures.length)];
 		// Slightly detuned: close enough to pass, wrong enough to nag.
-		this.world.playSound(null, this.x, this.y, this.z, pick, SoundCategory.NEUTRAL, 1.3F, 0.55F + this.random.nextFloat() * 0.2F);
+		this.level().playSound(null, this.getX(), this.getY(), this.getZ(), pick, SoundSource.NEUTRAL, 1.3F,
+				0.55F + this.random.nextFloat() * 0.2F);
 	}
 
-	private void reveal(PlayerEntity player) {
+	private void reveal(Player player) {
 		this.revealed = true;
-		this.setAiDisabled(false);
-		this.getAttributeContainer().get(EntityAttributes.GENERIC_MOVEMENT_SPEED).setBaseValue(0.42);
+		this.setNoAi(false);
+		this.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.42);
 		this.setTarget(player);
-		this.world.playSound(null, this.x, this.y, this.z, Sounds.ENTITY_GHAST_SCREAM, SoundCategory.HOSTILE, 1.6F, 0.7F);
+		this.level().playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.GHAST_SCREAM, SoundSource.HOSTILE, 1.6F, 0.7F);
 		DreadDirector.addDread(player, 15.0);
 	}
 
 	@Override
-	public boolean damage(DamageSource source, float amount) {
-		boolean hurt = super.damage(source, amount);
+	public boolean hurt(DamageSource source, float amount) {
+		boolean hurt = super.hurt(source, amount);
 
-		if (hurt && !this.world.isClient && !this.revealed && source.getAttacker() instanceof PlayerEntity) {
-			this.reveal((PlayerEntity) source.getAttacker());
+		if (hurt && !this.level().isClientSide && !this.revealed && source.getEntity() instanceof Player player) {
+			this.reveal(player);
 		}
 
 		return hurt;
 	}
 
 	@Override
-	protected Sound ambientSound() {
-		return this.revealed ? Sounds.ENTITY_VILLAGER_NO : null;
+	protected SoundEvent getAmbientSound() {
+		return this.revealed ? SoundEvents.VILLAGER_NO : null;
 	}
 
 	@Override
-	protected Sound getHurtSound(DamageSource source) {
-		return Sounds.ENTITY_VILLAGER_HURT;
+	protected SoundEvent getHurtSound(DamageSource source) {
+		return SoundEvents.VILLAGER_HURT;
 	}
 
 	@Override
-	protected Sound deathSound() {
-		return Sounds.ENTITY_VILLAGER_DEATH;
+	protected SoundEvent getDeathSound() {
+		return SoundEvents.VILLAGER_DEATH;
 	}
 
 	@Override
-	public float getSoundPitch() {
-		return super.getSoundPitch() * 0.7F;
+	public float getVoicePitch() {
+		return super.getVoicePitch() * 0.7F;
 	}
 
 	@Override
-	public void writeCustomDataToNbt(NbtCompound nbt) {
-		super.writeCustomDataToNbt(nbt);
-		nbt.putBoolean("Revealed", this.revealed);
+	public void addAdditionalSaveData(CompoundTag tag) {
+		super.addAdditionalSaveData(tag);
+		tag.putBoolean("Revealed", this.revealed);
 	}
 
 	@Override
-	public void readCustomDataFromNbt(NbtCompound nbt) {
-		super.readCustomDataFromNbt(nbt);
-		this.revealed = nbt.getBoolean("Revealed");
-		this.setAiDisabled(!this.revealed);
+	public void readAdditionalSaveData(CompoundTag tag) {
+		super.readAdditionalSaveData(tag);
+		this.revealed = tag.getBoolean("Revealed");
+		this.setNoAi(!this.revealed);
 	}
 }

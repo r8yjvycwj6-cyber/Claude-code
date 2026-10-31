@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " G ",
+    "GIG",
+    " G "
+  ],
+  "key": {
+    "G": { "item": "minecraft:glowstone_dust" },
+    "I": { "item": "minecraft:gold_ingot" }
+  },
+  "result": { "id": "horrorentities:warding_charm", "count": 1 }
+}

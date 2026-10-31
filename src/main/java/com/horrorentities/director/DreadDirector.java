@@ -5,9 +5,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
-import java.util.function.Function;
+import java.util.function.BooleanSupplier;
 
 import com.horrorentities.HorrorConfig;
 import com.horrorentities.entity.GauntEntity;
@@ -17,28 +16,29 @@ import com.horrorentities.entity.MimicEntity;
 import com.horrorentities.entity.ShadeEntity;
 import com.horrorentities.entity.StalkerEntity;
 import com.horrorentities.item.WardingCharmItem;
+import com.horrorentities.registry.ModEntities;
 import com.horrorentities.util.HorrorFx;
 import com.horrorentities.util.SpawnUtil;
 
-import net.legacyfabric.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.sound.SoundCategory;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.ServerPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.entity.ItemEntity;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.sound.Sound;
-import net.minecraft.sound.Sounds;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableText;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.World;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.event.TickEvent;
 
 /**
  * The thing that makes the dark feel like it is paying attention.
@@ -49,9 +49,13 @@ import net.minecraft.world.World;
  * fake chat and snuffed torches, then the entities themselves.
  */
 public final class DreadDirector {
+	public static final String[] ENTITY_NAMES = {"stalker", "hollow", "mimic", "gaunt", "shade"};
+	public static final String[] EVENT_NAMES = {"ambient", "chat", "torch"};
+
 	private static final Map<UUID, State> STATES = new HashMap<>();
-	private static final List<PendingSound> PENDING = new ArrayList<>();
-	private static final Random RANDOM = new Random();
+	private static final List<PendingSound> PENDING_SOUNDS = new ArrayList<>();
+	private static final List<PendingMessage> PENDING_MESSAGES = new ArrayList<>();
+	private static final RandomSource RANDOM = RandomSource.create();
 	private static final String[] FAKE_NAMES = {"Herobrine", "Null", "xX_Him_Xx", "???"};
 	private static final int WHISPER_COUNT = 8;
 
@@ -63,83 +67,67 @@ public final class DreadDirector {
 		int cooldownSeconds = 45;
 	}
 
-	private static final class PendingSound {
-		final UUID player;
-		final Sound sound;
-		final double x, y, z;
-		final float volume, pitch;
-		int ticksLeft;
-
-		PendingSound(UUID player, Sound sound, double x, double y, double z, float volume, float pitch, int delay) {
-			this.player = player;
-			this.sound = sound;
-			this.x = x;
-			this.y = y;
-			this.z = z;
-			this.volume = volume;
-			this.pitch = pitch;
-			this.ticksLeft = delay;
-		}
+	private record PendingSound(UUID player, SoundEvent sound, double x, double y, double z, float volume, float pitch, int[] ticksLeft) {
 	}
 
-	public static void register() {
-		ServerTickEvents.END_SERVER_TICK.register(DreadDirector::onServerTick);
+	private record PendingMessage(UUID player, Component message, int[] ticksLeft) {
 	}
 
-	public static double getDread(PlayerEntity player) {
-		State state = STATES.get(player.getUuid());
+	// ---------------------------------------------------------------- dread
+
+	public static double getDread(Player player) {
+		State state = STATES.get(player.getUUID());
 		return state == null ? 0 : state.dread;
 	}
 
-	public static void setDread(PlayerEntity player, double value) {
+	public static void setDread(Player player, double value) {
 		state(player).dread = clamp(value);
 	}
 
-	public static void addDread(PlayerEntity player, double amount) {
+	public static void addDread(Player player, double amount) {
 		State state = state(player);
 		state.dread = clamp(state.dread + amount);
 	}
 
-	private static State state(PlayerEntity player) {
-		return STATES.computeIfAbsent(player.getUuid(), id -> new State());
+	private static State state(Player player) {
+		return STATES.computeIfAbsent(player.getUUID(), id -> new State());
 	}
 
 	private static double clamp(double v) {
 		return Math.max(0.0, Math.min(100.0, v));
 	}
 
-	// ---------------------------------------------------------------- tick
+	// ----------------------------------------------------------------- tick
 
-	private static void onServerTick(MinecraftServer server) {
-		tickPendingSounds(server);
-
-		if (!HorrorConfig.enableDirector || server.getTicks() % 20 != 0) {
+	public static void onServerTick(TickEvent.ServerTickEvent event) {
+		if (event.phase != TickEvent.Phase.END) {
 			return;
 		}
 
-		ServerWorld world = server.getWorld(0);
+		MinecraftServer server = event.getServer();
+		tickPending(server);
 
-		if (world == null) {
+		if (!HorrorConfig.ENABLE_DIRECTOR.get() || server.getTickCount() % 20 != 0) {
 			return;
 		}
 
-		STATES.keySet().removeIf(id -> world.getPlayerByUuid(id) == null);
+		ServerLevel level = server.overworld();
+		STATES.keySet().removeIf(id -> server.getPlayerList().getPlayer(id) == null);
 
-		for (PlayerEntity player : new ArrayList<>(world.playerEntities)) {
-			if (player instanceof ServerPlayerEntity && !player.isSpectator() && !player.isCreative()) {
-				tickPlayer(world, (ServerPlayerEntity) player);
+		for (ServerPlayer player : new ArrayList<>(level.players())) {
+			if (!player.isSpectator() && !player.isCreative()) {
+				tickPlayer(level, player);
 			}
 		}
 	}
 
-	private static void tickPlayer(ServerWorld world, ServerPlayerEntity player) {
+	private static void tickPlayer(ServerLevel level, ServerPlayer player) {
 		State state = state(player);
-		BlockPos pos = new BlockPos(player.x, player.y + 0.5, player.z);
-		int light = world.getLightLevel(pos);
-		boolean night = !world.isDay();
-		boolean sky = world.hasDirectSunlight(pos);
+		BlockPos pos = BlockPos.containing(player.getX(), player.getY() + 0.5, player.getZ());
+		int light = level.getMaxLocalRawBrightness(pos);
+		boolean night = !level.isDay();
+		boolean sky = level.canSeeSky(pos);
 		boolean dark = light <= 4;
-		boolean protectedByCharm = WardingCharmItem.isProtected(player);
 
 		double delta = 0;
 
@@ -161,13 +149,15 @@ public final class DreadDirector {
 			delta -= 0.15;
 		}
 
-		if (hasHorrorNearby(world, player, 48)) {
+		if (countHorrors(level, player, 48) > 0) {
 			delta += 0.5;
 		}
 
-		delta *= delta > 0 ? HorrorConfig.dreadGainMultiplier : 1.0;
+		if (delta > 0) {
+			delta *= HorrorConfig.DREAD_GAIN_MULTIPLIER.get();
+		}
 
-		if (protectedByCharm) {
+		if (WardingCharmItem.isProtected(player)) {
 			delta = delta > 0 ? delta * 0.25 : delta - 0.3;
 		}
 
@@ -178,37 +168,36 @@ public final class DreadDirector {
 		}
 
 		state.cooldownSeconds = nextCooldown(state.dread);
-		runEvent(world, player, state.dread, night, dark, sky);
+		runEvent(level, player, state.dread, night, dark, sky);
 	}
 
 	private static int nextCooldown(double dread) {
 		double base = 75.0 - dread * 0.5;
 		double jitter = 0.7 + RANDOM.nextDouble() * 0.6;
-		return (int) Math.max(10, base * jitter / Math.max(0.1, HorrorConfig.eventFrequency));
+		return (int) Math.max(10, base * jitter / Math.max(0.1, HorrorConfig.EVENT_FREQUENCY.get()));
 	}
 
-	// -------------------------------------------------------------- events
+	// --------------------------------------------------------------- events
 
-	private static void runEvent(ServerWorld world, ServerPlayerEntity player, double dread, boolean night, boolean dark, boolean sky) {
+	private static void runEvent(ServerLevel level, ServerPlayer player, double dread, boolean night, boolean dark, boolean sky) {
 		boolean cave = dark && !sky;
 		boolean spooky = night || cave;
-		int crowd = countHorrors(world, player, 96);
-		boolean roomForMore = crowd < HorrorConfig.maxEntitiesPerPlayer;
+		boolean roomForMore = countHorrors(level, player, 96) < HorrorConfig.MAX_ENTITIES_PER_PLAYER.get();
 
 		List<Runnable> pool = new ArrayList<>();
-		addWeighted(pool, 6, HorrorConfig.enableAmbientSounds && dread >= 8, () -> ambientEvent(world, player));
-		addWeighted(pool, 2, HorrorConfig.enableFakeChat && dread >= 25, () -> chatEvent(player));
-		addWeighted(pool, 2, HorrorConfig.enableTorchSnuffing && dread >= 35, () -> snuffTorchEvent(world, player));
-		addWeighted(pool, 3, roomForMore && spooky && dread >= 20 && !has(world, player, HollowEntity.class),
-				() -> spawnHollow(world, player));
-		addWeighted(pool, 4, roomForMore && dark && dread >= 30 && !has(world, player, ShadeEntity.class),
-				() -> spawnShade(world, player));
-		addWeighted(pool, 3, roomForMore && spooky && dread >= 40 && !has(world, player, StalkerEntity.class),
-				() -> spawnStalker(world, player));
-		addWeighted(pool, 2, roomForMore && spooky && dread >= 45 && !has(world, player, MimicEntity.class),
-				() -> spawnMimic(world, player));
-		addWeighted(pool, 2, roomForMore && night && dread >= 55 && !has(world, player, GauntEntity.class),
-				() -> spawnGaunt(world, player));
+		addWeighted(pool, 6, HorrorConfig.ENABLE_AMBIENT_SOUNDS.get() && dread >= 8, () -> ambientEvent(player));
+		addWeighted(pool, 2, HorrorConfig.ENABLE_FAKE_CHAT.get() && dread >= 25, () -> chatEvent(player));
+		addWeighted(pool, 2, HorrorConfig.ENABLE_TORCH_SNUFFING.get() && dread >= 35, () -> snuffTorchEvent(level, player));
+		addWeighted(pool, 3, roomForMore && spooky && dread >= 20 && !has(level, player, HollowEntity.class),
+				() -> spawnNear(level, player, ModEntities.HOLLOW.get(), 26, 40, true, -1, true));
+		addWeighted(pool, 4, roomForMore && dark && dread >= 30 && !has(level, player, ShadeEntity.class),
+				() -> spawnNear(level, player, ModEntities.SHADE.get(), 9, 15, false, 4, false));
+		addWeighted(pool, 3, roomForMore && spooky && dread >= 40 && !has(level, player, StalkerEntity.class),
+				() -> spawnNear(level, player, ModEntities.STALKER.get(), 30, 46, false, 16, false));
+		addWeighted(pool, 2, roomForMore && spooky && dread >= 45 && !has(level, player, MimicEntity.class),
+				() -> spawnNear(level, player, ModEntities.MIMIC.get(), 16, 24, false, 6, false));
+		addWeighted(pool, 2, roomForMore && night && dread >= 55 && !has(level, player, GauntEntity.class),
+				() -> spawnNear(level, player, ModEntities.GAUNT.get(), 22, 32, false, 8, false));
 
 		if (!pool.isEmpty()) {
 			pool.get(RANDOM.nextInt(pool.size())).run();
@@ -224,69 +213,62 @@ public final class DreadDirector {
 	}
 
 	/** Something walks up behind you, or a door you never saw creaks open. */
-	private static void ambientEvent(ServerWorld world, ServerPlayerEntity player) {
-		double behind = Math.toRadians(player.yaw + 180.0 + (RANDOM.nextDouble() - 0.5) * 100.0);
+	private static void ambientEvent(ServerPlayer player) {
+		double behind = Math.toRadians(player.getYRot() + 180.0 + (RANDOM.nextDouble() - 0.5) * 100.0);
 		double dist = 6 + RANDOM.nextDouble() * 8;
-		double x = player.x - Math.sin(behind) * dist;
-		double z = player.z + Math.cos(behind) * dist;
+		double x = player.getX() - Math.sin(behind) * dist;
+		double z = player.getZ() + Math.cos(behind) * dist;
 
 		switch (RANDOM.nextInt(5)) {
-			case 0:
+			case 0 -> {
 				// Footsteps closing in, then nothing.
 				for (int i = 0; i < 5; i++) {
 					double d = dist * (1.0 - i * 0.17);
-					queue(player, Sounds.BLOCK_GRAVEL_STEP, player.x - Math.sin(behind) * d, player.y, player.z + Math.cos(behind) * d,
-							0.9F, 0.7F + RANDOM.nextFloat() * 0.1F, 9 * i);
+					queueSound(player, SoundEvents.GRAVEL_STEP, player.getX() - Math.sin(behind) * d, player.getY(),
+							player.getZ() + Math.cos(behind) * d, 0.9F, 0.7F + RANDOM.nextFloat() * 0.1F, 9 * i);
 				}
-
-				break;
-			case 1:
-				HorrorFx.soundFor(player, Sounds.BLOCK_WOODEN_DOOR_OPEN, x, player.y, z, 0.8F, 0.6F);
-				break;
-			case 2:
-				HorrorFx.soundFor(player, Sounds.AMBIENT_CAVE, x, player.y, z, 1.0F, 0.5F + RANDOM.nextFloat() * 0.4F);
-				break;
-			case 3:
-				HorrorFx.soundFor(player, Sounds.ENTITY_GHAST_AMBIENT, x, player.y + 4, z, 0.6F, 0.4F);
-				break;
-			default:
-				HorrorFx.soundFor(player, Sounds.BLOCK_CHEST_OPEN, x, player.y, z, 0.7F, 0.7F);
-				queue(player, Sounds.BLOCK_CHEST_CLOSE, x, player.y, z, 0.7F, 0.7F, 25);
-				break;
+			}
+			case 1 -> HorrorFx.soundFor(player, SoundEvents.WOODEN_DOOR_OPEN, x, player.getY(), z, 0.8F, 0.6F);
+			case 2 -> HorrorFx.soundFor(player, SoundEvents.AMBIENT_CAVE, x, player.getY(), z, 1.0F, 0.5F + RANDOM.nextFloat() * 0.4F);
+			case 3 -> HorrorFx.soundFor(player, SoundEvents.GHAST_AMBIENT, x, player.getY() + 4, z, 0.6F, 0.4F);
+			default -> {
+				HorrorFx.soundFor(player, SoundEvents.CHEST_OPEN, x, player.getY(), z, 0.7F, 0.7F);
+				queueSound(player, SoundEvents.CHEST_CLOSE, x, player.getY(), z, 0.7F, 0.7F, 25);
+			}
 		}
 
 		addDread(player, 1.0);
 	}
 
 	/** Fake chat: someone joins and leaves, or something whispers. */
-	private static void chatEvent(ServerPlayerEntity player) {
+	private static void chatEvent(ServerPlayer player) {
 		if (RANDOM.nextBoolean()) {
 			String name = FAKE_NAMES[RANDOM.nextInt(FAKE_NAMES.length)];
-			Text joined = new TranslatableText("multiplayer.player.joined", name).setStyle(new Style().setFormatting(Formatting.YELLOW));
-			player.sendMessage(joined);
-			Text left = new TranslatableText("multiplayer.player.left", name).setStyle(new Style().setFormatting(Formatting.YELLOW));
-			scheduleMessage(player, left, 60 + RANDOM.nextInt(80));
+			player.sendSystemMessage(Component.translatable("multiplayer.player.joined", name).withStyle(ChatFormatting.YELLOW));
+			PENDING_MESSAGES.add(new PendingMessage(player.getUUID(),
+					Component.translatable("multiplayer.player.left", name).withStyle(ChatFormatting.YELLOW),
+					new int[] {60 + RANDOM.nextInt(80)}));
 		} else {
-			Text whisper = new TranslatableText("chat.horrorentities.whisper." + (1 + RANDOM.nextInt(WHISPER_COUNT)))
-					.setStyle(new Style().setFormatting(Formatting.GRAY).setItalic(true));
-			player.sendMessage(whisper);
+			player.sendSystemMessage(Component.translatable("chat.horrorentities.whisper." + (1 + RANDOM.nextInt(WHISPER_COUNT)))
+					.withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC));
 		}
 
 		addDread(player, 2.0);
 	}
 
-	private static void snuffTorchEvent(ServerWorld world, ServerPlayerEntity player) {
-		BlockPos origin = new BlockPos(player.x, player.y, player.z);
+	private static void snuffTorchEvent(ServerLevel level, ServerPlayer player) {
+		BlockPos origin = player.blockPosition();
 		List<BlockPos> torches = new ArrayList<>();
-		BlockPos.Mutable cursor = new BlockPos.Mutable();
+		BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
 		for (int dx = -8; dx <= 8; dx++) {
 			for (int dy = -3; dy <= 4; dy++) {
 				for (int dz = -8; dz <= 8; dz++) {
-					cursor.setPosition(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+					cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+					BlockState state = level.getBlockState(cursor);
 
-					if (world.getBlockState(cursor).getBlock() == Blocks.TORCH) {
-						torches.add(cursor.toImmutable());
+					if (state.is(Blocks.TORCH) || state.is(Blocks.WALL_TORCH)) {
+						torches.add(cursor.immutable());
 					}
 				}
 			}
@@ -297,131 +279,118 @@ public final class DreadDirector {
 		}
 
 		BlockPos torch = torches.get(RANDOM.nextInt(torches.size()));
-		world.setBlockState(torch, Blocks.AIR.getDefaultState());
-		world.spawnEntity(new ItemEntity(world, torch.getX() + 0.5, torch.getY() + 0.5, torch.getZ() + 0.5, new ItemStack(Blocks.TORCH)));
-		HorrorFx.soundFor(player, Sounds.BLOCK_FIRE_EXTINGUISH, torch.getX() + 0.5, torch.getY(), torch.getZ() + 0.5, 0.8F, 1.0F);
+		level.destroyBlock(torch, true);
+		HorrorFx.soundFor(player, SoundEvents.FIRE_EXTINGUISH, torch.getX() + 0.5, torch.getY(), torch.getZ() + 0.5, 0.8F, 1.0F);
 		addDread(player, 3.0);
 	}
 
-	// ------------------------------------------------------------- spawns
-
-	private static void spawnHollow(ServerWorld world, ServerPlayerEntity player) {
-		// Somewhere in front of you, in clear view, far away.
-		spawn(world, player, HollowEntity::new, 26, 40, true, -1, true);
-	}
-
-	private static void spawnStalker(ServerWorld world, ServerPlayerEntity player) {
-		spawn(world, player, StalkerEntity::new, 30, 46, false, 16, false);
-	}
-
-	private static void spawnMimic(ServerWorld world, ServerPlayerEntity player) {
-		spawn(world, player, MimicEntity::new, 16, 24, false, 6, false);
-	}
-
-	private static void spawnGaunt(ServerWorld world, ServerPlayerEntity player) {
-		spawn(world, player, GauntEntity::new, 22, 32, false, 8, false);
-	}
-
-	private static void spawnShade(ServerWorld world, ServerPlayerEntity player) {
-		spawn(world, player, ShadeEntity::new, 9, 15, false, 4, false);
-	}
+	// --------------------------------------------------------------- spawns
 
 	/**
 	 * Tries a handful of random spots on a ring around the player.
 	 *
-	 * @param inFront     restrict the angle to roughly where the player is looking
-	 * @param maxLight    spawn only where block light is at or below this (-1 = ignore)
-	 * @param needSight   require an unobstructed line from the player's eyes
+	 * @param inFront   restrict the angle to roughly where the player is looking
+	 * @param maxLight  spawn only where light is at or below this (-1 = ignore)
+	 * @param needSight require an unobstructed line from the player's eyes
 	 */
-	private static void spawn(ServerWorld world, ServerPlayerEntity player, Function<World, ? extends Entity> factory,
+	private static boolean spawnNear(ServerLevel level, ServerPlayer player, EntityType<?> type,
 			double minDist, double maxDist, boolean inFront, int maxLight, boolean needSight) {
 		for (int attempt = 0; attempt < 12; attempt++) {
 			double angle = inFront
-					? Math.toRadians(player.yaw + (RANDOM.nextDouble() - 0.5) * 70.0)
+					? Math.toRadians(player.getYRot() + (RANDOM.nextDouble() - 0.5) * 70.0)
 					: RANDOM.nextDouble() * Math.PI * 2;
 			double dist = minDist + RANDOM.nextDouble() * (maxDist - minDist);
-			int x = (int) Math.floor(player.x - Math.sin(angle) * dist);
-			int z = (int) Math.floor(player.z + Math.cos(angle) * dist);
+			int x = (int) Math.floor(player.getX() - Math.sin(angle) * dist);
+			int z = (int) Math.floor(player.getZ() + Math.cos(angle) * dist);
 
-			if (!SpawnUtil.isLoaded(world, x, z)) {
+			if (!SpawnUtil.isLoaded(level, x, z)) {
 				continue;
 			}
 
-			int y = SpawnUtil.findStandingY(world, x, (int) player.y, z, 10, 3);
+			int y = SpawnUtil.findStandingY(level, x, (int) player.getY(), z, 10, 3);
 
-			if (y < 0) {
+			if (y == Integer.MIN_VALUE) {
 				continue;
 			}
 
 			BlockPos feet = new BlockPos(x, y, z);
 
-			if (maxLight >= 0 && world.getLightLevel(feet) > maxLight) {
+			if (maxLight >= 0 && level.getMaxLocalRawBrightness(feet) > maxLight) {
 				continue;
 			}
 
-			if (needSight && world.rayTrace(new Vec3d(player.x, player.y + player.getEyeHeight(), player.z),
-					new Vec3d(x + 0.5, y + 1.6, z + 0.5)) != null) {
-				continue;
+			if (needSight) {
+				Vec3 eyes = player.getEyePosition();
+				Vec3 target = new Vec3(x + 0.5, y + 1.6, z + 0.5);
+
+				if (level.clip(new ClipContext(eyes, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player)).getType() != HitResult.Type.MISS) {
+					continue;
+				}
 			}
 
-			Entity entity = factory.apply(world);
-			entity.refreshPositionAndAngles(x + 0.5, y, z + 0.5, (float) Math.toDegrees(Math.atan2(player.x - x, -(player.z - z))), 0.0F);
-			world.spawnEntity(entity);
-			addDread(player, 2.0);
-			return;
+			if (place(level, type, x + 0.5, y, z + 0.5, player)) {
+				addDread(player, 2.0);
+				return true;
+			}
 		}
+
+		return false;
+	}
+
+	private static boolean place(ServerLevel level, EntityType<?> type, double x, double y, double z, Player facing) {
+		Entity entity = type.create(level);
+
+		if (entity == null) {
+			return false;
+		}
+
+		float yaw = (float) Math.toDegrees(Math.atan2(facing.getX() - x, -(facing.getZ() - z)));
+		entity.moveTo(x, y, z, yaw, 0.0F);
+		return level.addFreshEntity(entity);
 	}
 
 	// ------------------------------------------------- command / debug API
 
-	public static final String[] ENTITY_NAMES = {"stalker", "hollow", "mimic", "gaunt", "shade"};
-	public static final String[] EVENT_NAMES = {"ambient", "chat", "torch"};
-
 	/** Spawns an entity of the given kind {@code distance} blocks in front of the player, facing them. */
-	public static boolean spawnInFront(ServerWorld world, ServerPlayerEntity player, String name, double distance) {
-		Function<World, ? extends Entity> factory = factoryFor(name);
+	public static boolean spawnInFront(ServerLevel level, ServerPlayer player, String name, double distance) {
+		var type = ModEntities.byName(name);
 
-		if (factory == null) {
+		if (type == null) {
 			return false;
 		}
 
-		double angle = Math.toRadians(player.yaw);
-		int x = (int) Math.floor(player.x - Math.sin(angle) * distance);
-		int z = (int) Math.floor(player.z + Math.cos(angle) * distance);
-		int y = SpawnUtil.findStandingY(world, x, (int) player.y, z, 8, 3);
+		double angle = Math.toRadians(player.getYRot());
+		int x = (int) Math.floor(player.getX() - Math.sin(angle) * distance);
+		int z = (int) Math.floor(player.getZ() + Math.cos(angle) * distance);
+		int y = SpawnUtil.findStandingY(level, x, (int) player.getY(), z, 8, 3);
 
-		if (y < 0 || !SpawnUtil.isLoaded(world, x, z)) {
+		if (y == Integer.MIN_VALUE || !SpawnUtil.isLoaded(level, x, z)) {
 			return false;
 		}
 
-		Entity entity = factory.apply(world);
-		entity.refreshPositionAndAngles(x + 0.5, y, z + 0.5, (float) Math.toDegrees(Math.atan2(player.x - x, -(player.z - z))), 0.0F);
-		return world.spawnEntity(entity);
+		return place(level, type.get(), x + 0.5, y, z + 0.5, player);
 	}
 
-	public static boolean triggerEvent(ServerWorld world, ServerPlayerEntity player, String name) {
+	public static boolean triggerEvent(ServerLevel level, ServerPlayer player, String name) {
 		switch (name) {
-			case "ambient":
-				ambientEvent(world, player);
-				return true;
-			case "chat":
-				chatEvent(player);
-				return true;
-			case "torch":
-				snuffTorchEvent(world, player);
-				return true;
-			default:
+			case "ambient" -> ambientEvent(player);
+			case "chat" -> chatEvent(player);
+			case "torch" -> snuffTorchEvent(level, player);
+			default -> {
 				return false;
+			}
 		}
+
+		return true;
 	}
 
 	/** Removes every loaded horror entity in the world. Returns how many there were. */
-	public static int clearAll(ServerWorld world) {
+	public static int clearAll(ServerLevel level) {
 		int removed = 0;
 
-		for (Entity entity : new ArrayList<>(world.loadedEntities)) {
+		for (Entity entity : level.getAllEntities()) {
 			if (entity instanceof HorrorMob) {
-				entity.remove();
+				entity.discard();
 				removed++;
 			}
 		}
@@ -429,97 +398,56 @@ public final class DreadDirector {
 		return removed;
 	}
 
-	private static Function<World, ? extends Entity> factoryFor(String name) {
-		switch (name) {
-			case "stalker":
-				return StalkerEntity::new;
-			case "hollow":
-				return HollowEntity::new;
-			case "mimic":
-				return MimicEntity::new;
-			case "gaunt":
-				return GauntEntity::new;
-			case "shade":
-				return ShadeEntity::new;
-			default:
-				return null;
-		}
+	// -------------------------------------------------------------- helpers
+
+	private static int countHorrors(Level level, Player player, double range) {
+		return level.getEntitiesOfClass(Entity.class, player.getBoundingBox().inflate(range), e -> e instanceof HorrorMob).size();
 	}
 
-	// ------------------------------------------------------------ helpers
-
-	private static boolean hasHorrorNearby(World world, PlayerEntity player, double range) {
-		return countHorrors(world, player, range) > 0;
+	private static boolean has(Level level, Player player, Class<? extends Entity> type) {
+		return !level.getEntitiesOfClass(type, player.getBoundingBox().inflate(96)).isEmpty();
 	}
 
-	private static int countHorrors(World world, PlayerEntity player, double range) {
-		return world.getEntitiesInBox(Entity.class, player.getBoundingBox().expand(range), e -> e instanceof HorrorMob).size();
-	}
-
-	private static boolean has(World world, PlayerEntity player, Class<? extends Entity> type) {
-		return !world.getEntitiesInBox(type, player.getBoundingBox().expand(96)).isEmpty();
-	}
-
-	private static void queue(PlayerEntity player, Sound sound, double x, double y, double z, float volume, float pitch, int delay) {
+	private static void queueSound(Player player, SoundEvent sound, double x, double y, double z, float volume, float pitch, int delay) {
 		if (delay <= 0) {
 			HorrorFx.soundFor(player, sound, x, y, z, volume, pitch);
 		} else {
-			PENDING.add(new PendingSound(player.getUuid(), sound, x, y, z, volume, pitch, delay));
+			PENDING_SOUNDS.add(new PendingSound(player.getUUID(), sound, x, y, z, volume, pitch, new int[] {delay}));
 		}
 	}
 
-	private static void scheduleMessage(ServerPlayerEntity player, Text message, int delay) {
-		PENDING_MESSAGES.add(new PendingMessage(player.getUuid(), message, delay));
-	}
-
-	private static final List<PendingMessage> PENDING_MESSAGES = new ArrayList<>();
-
-	private static final class PendingMessage {
-		final UUID player;
-		final Text message;
-		int ticksLeft;
-
-		PendingMessage(UUID player, Text message, int ticksLeft) {
-			this.player = player;
-			this.message = message;
-			this.ticksLeft = ticksLeft;
-		}
-	}
-
-	private static void tickPendingSounds(MinecraftServer server) {
-		if (PENDING.isEmpty() && PENDING_MESSAGES.isEmpty()) {
+	private static void tickPending(MinecraftServer server) {
+		if (PENDING_SOUNDS.isEmpty() && PENDING_MESSAGES.isEmpty()) {
 			return;
 		}
 
-		World world = server.getWorld(0);
-
-		for (Iterator<PendingSound> it = PENDING.iterator(); it.hasNext(); ) {
+		for (Iterator<PendingSound> it = PENDING_SOUNDS.iterator(); it.hasNext(); ) {
 			PendingSound pending = it.next();
 
-			if (--pending.ticksLeft > 0) {
+			if (--pending.ticksLeft()[0] > 0) {
 				continue;
 			}
 
 			it.remove();
-			PlayerEntity player = world == null ? null : world.getPlayerByUuid(pending.player);
+			ServerPlayer player = server.getPlayerList().getPlayer(pending.player());
 
 			if (player != null) {
-				HorrorFx.soundFor(player, pending.sound, pending.x, pending.y, pending.z, pending.volume, pending.pitch);
+				HorrorFx.soundFor(player, pending.sound(), pending.x(), pending.y(), pending.z(), pending.volume(), pending.pitch());
 			}
 		}
 
 		for (Iterator<PendingMessage> it = PENDING_MESSAGES.iterator(); it.hasNext(); ) {
 			PendingMessage pending = it.next();
 
-			if (--pending.ticksLeft > 0) {
+			if (--pending.ticksLeft()[0] > 0) {
 				continue;
 			}
 
 			it.remove();
-			PlayerEntity player = world == null ? null : world.getPlayerByUuid(pending.player);
+			ServerPlayer player = server.getPlayerList().getPlayer(pending.player());
 
 			if (player != null) {
-				player.sendMessage(pending.message);
+				player.sendSystemMessage(pending.message());
 			}
 		}
 	}

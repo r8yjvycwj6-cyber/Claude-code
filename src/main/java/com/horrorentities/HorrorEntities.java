@@ -1,29 +1,45 @@
 package com.horrorentities;
 
+import com.horrorentities.client.ClientSetup;
+import com.horrorentities.command.HorrorCommand;
 import com.horrorentities.director.DreadDirector;
 import com.horrorentities.registry.ModEntities;
 import com.horrorentities.registry.ModItems;
-import com.horrorentities.registry.ModRecipes;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
-import net.fabricmc.api.ModInitializer;
-import net.legacyfabric.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.minecraft.server.command.CommandRegistry;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 
-public class HorrorEntities implements ModInitializer {
+@Mod(HorrorEntities.MOD_ID)
+public class HorrorEntities {
 	public static final String MOD_ID = "horrorentities";
-	public static final Logger LOGGER = LogManager.getLogger(MOD_ID);
+	public static final Logger LOGGER = LogUtils.getLogger();
 
-	@Override
-	public void onInitialize() {
-		HorrorConfig.load();
-		ModItems.register();
-		ModEntities.register();
-		ModRecipes.register();
-		DreadDirector.register();
-		ServerLifecycleEvents.SERVER_STARTING.register(server ->
-				((CommandRegistry) server.getCommandManager()).registerCommand(new HorrorCommand()));
+	public HorrorEntities(FMLJavaModLoadingContext context) {
+		IEventBus modBus = context.getModEventBus();
+
+		ModEntities.ENTITIES.register(modBus);
+		ModItems.ITEMS.register(modBus);
+		ModItems.TABS.register(modBus);
+		modBus.addListener(ModEntities::onAttributes);
+
+		context.registerConfig(ModConfig.Type.COMMON, HorrorConfig.SPEC);
+
+		MinecraftForge.EVENT_BUS.addListener(DreadDirector::onServerTick);
+		MinecraftForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> HorrorCommand.register(event.getDispatcher()));
+
+		if (FMLEnvironment.dist == Dist.CLIENT) {
+			ClientSetup.register(modBus);
+		}
+
 		LOGGER.info("Horror Entities loaded. Do not look behind you.");
 	}
 }

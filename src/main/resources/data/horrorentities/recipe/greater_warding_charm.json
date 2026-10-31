@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    { "item": "horrorentities:warding_charm" },
+    { "item": "horrorentities:nightmare_shard" },
+    { "item": "horrorentities:nightmare_shard" },
+    { "item": "horrorentities:nightmare_shard" },
+    { "item": "horrorentities:nightmare_shard" }
+  ],
+  "result": { "id": "horrorentities:greater_warding_charm", "count": 1 }
+}

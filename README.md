@@ -1,13 +1,11 @@
 # Horror Entities（恐怖实体）
 
-**Minecraft 1.12.2 · Legacy Fabric 模组**
+**Minecraft 1.21.1 · Forge 52.1.x · Java 21**
 
 五种恐怖实体 + 一个决定"什么时候该出事"的恐惧导演系统。设计依据是对 Herobrine、Entity 303、Null 等 Minecraft 恐怖传说，
 以及社区恐怖模组（The Only One、Shadow Stalker、Umbral Hunt 等）共同特征的调研，见下文。
 
-> ⚠️ **关于 "Fabric 1.12.2"**：官方 Fabric 只支持 1.14+。1.12.2 上的 Fabric 由社区项目 **[Legacy Fabric](https://legacyfabric.net/)**
-> 提供（同样使用 Fabric Loader + Mixin，API 为 Legacy Fabric API）。本模组基于它构建，玩家端需要安装
-> Fabric Loader + **Legacy Fabric API**。
+> 本模组最初是 1.12.2 + Legacy Fabric 版本（git 提交 `6fb5449`），现已整体迁移并重写为 1.21.1 Forge（官方 Mojang 映射）。
 
 ## 调研：恐怖实体的共同特征
 
@@ -30,9 +28,9 @@
 | **空洞之影 The Hollow One** | 白眼人形，**无害且不可被伤害**。远远站着看你；你看它、靠近它、打它，它都会消失；偶尔留下"下界岩 + 红石火把"的痕迹（可在配置里关闭） |
 | **拟态者 The Mimic** | 静止不动，模仿动物/村民叫声引诱你；你走近 9 格内它才暴露本性，尖叫并高速冲刺 |
 | **瘦骨者 The Gaunt** | 夜间猎手：快、会扑、爪子长；**怕阳光**（白天着火） |
-| **暗影 The Shade** | 只在黑暗中存在的剪影。光照 ≥ 8 会灼烧它；不敢靠近手持火把/荧石/海晶灯/南瓜灯的人；会悄悄熄灭附近火把；攻击附带虚弱+失明 |
+| **暗影 The Shade** | 只在黑暗中存在的剪影。光照 ≥ 8 会灼烧它；不敢靠近手持火把/灯笼/荧石/海晶灯/南瓜灯/菌光体的人；会悄悄熄灭附近火把；攻击附带虚弱+失明 |
 
-所有实体都带刷怪蛋，并在创造模式物品栏 **Horror Entities** 标签页中。击杀（Hollow 除外）可掉落**梦魇碎片**。
+所有实体都有刷怪蛋，并在创造模式物品栏 **Horror Entities** 标签页中。击杀（Hollow 除外）可掉落**梦魇碎片**。
 
 ## 恐惧导演（Dread Director）
 
@@ -44,7 +42,7 @@
 | ≥ 8 | 背后的脚步声、远处的开门声、洞穴音效、幽灵呻吟、箱子开合 |
 | ≥ 20 | Hollow 出现在远处视线里；假聊天 |
 | ≥ 30 | Shade 在黑暗处出现 |
-| ≥ 35 | 附近的火把被悄悄熄灭 |
+| ≥ 35 | 附近的火把被悄悄熄灭（掉落为物品） |
 | ≥ 40 | Stalker 出现 |
 | ≥ 45 | Mimic 出现 |
 | ≥ 55 | Gaunt 在夜间出现 |
@@ -67,7 +65,7 @@
 
 ## 配置
 
-首次启动生成 `config/horrorentities.properties`：
+首次启动生成 `config/horrorentities-common.toml`：
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
@@ -80,26 +78,33 @@
 | `enableTraces` | `true` | Hollow 留下下界岩+红石火把 |
 | `maxEntitiesPerPlayer` | `2` | 每名玩家附近同时存在的恐怖实体上限 |
 
-## 构建
+## 构建与测试
 
-需要 JDK 17+（编译目标为 Java 8）。
+需要 JDK 21。
 
 ```bash
-./gradlew build          # 产物在 build/libs/horror-entities-1.0.0.jar
-./gradlew runClient      # 开发客户端
-./gradlew runServer      # 开发服务端（需先在 run/eula.txt 写入 eula=true）
+./gradlew build                # 产物：build/libs/horrorentities-2.0.0.jar
+./gradlew runClient            # 开发客户端
+./gradlew runServer            # 开发服务端（先在 run/eula.txt 写入 eula=true）
+./gradlew runGameTestServer    # 行为测试（见下）
 python3 tools/generate_textures.py   # 重新生成全部贴图（需要 Pillow）
 ```
 
-* 构建使用 **legacy-looming 1.15.3**，需要 Gradle 9.2（仓库已带 wrapper）。
-* Mixin 目标在 `remapJar` 阶段由 Loom 重映射，不依赖 refmap。
+`runGameTestServer` 使用 Forge GameTest 在真实服务端里跑 12 个行为测试：潜行者冻结/逼近/单次攻击后消失、
+空洞之影被注视消失与无敌、拟态者休眠与暴露、瘦骨者锁定玩家与守护符驱散、日光灼烧、暗影怕光与手持火把、
+掉落、配方加载、导演 API（恐惧值、熄灯、生成、清除）。测试代码在 `com.horrorentities.gametest`，不会打进发布的 jar。
+
+说明：
+
 * 所有贴图由 `tools/generate_textures.py` 程序化生成，没有外部素材。声音复用原版音效（调整音调），不含自定义音频。
 * 本模组不注入自然刷怪表：全部实体由导演系统或命令生成，因此不会与其他模组的刷怪逻辑冲突。
+* `build.gradle` 末尾把资源输出目录合并到类目录：在本构建环境中，FML 在开发运行时只扫描 `MOD_CLASSES` 的第一个条目，
+  不合并就找不到 `@Mod` 类。对发布的 jar 没有影响。
 
 ## 安装
 
-1. 安装 Minecraft 1.12.2 的 Fabric Loader（通过 [Legacy Fabric 安装器](https://legacyfabric.net/)）。
-2. 把 **Legacy Fabric API** 与 `horror-entities-1.0.0.jar` 放进 `mods/`。
+1. 安装 Minecraft 1.21.1 的 Forge（52.1.x）。
+2. 把 `horrorentities-2.0.0.jar` 放进 `mods/`。
 3. 服务端与客户端都需要安装本模组。
 
 ## 调研来源
