@@ -82,7 +82,6 @@ tasks.named('jar', Jar).configure {
 		])
 	}
 
-	finalizedBy 'reobfJar'
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -93,3 +92,11 @@ tasks.withType(JavaCompile).configureEach {
 // Dev-environment workaround: in this setup FML only scans the first MOD_CLASSES entry (build/resources/main),
 // so keep classes and resources in one directory.
 sourceSets.main.output.resourcesDir = sourceSets.main.java.destinationDirectory.get().asFile
+
+// Forge 1.21.1 runs on official (Mojang) names, so the jar must NOT be re-obfuscated to SRG names
+// (a reobfuscated jar fails at runtime with NoSuchFieldError: ... f_279569_).
+tasks.configureEach { task ->
+	if (task.name.startsWith('reobf')) {
+		task.enabled = false
+	}
+}

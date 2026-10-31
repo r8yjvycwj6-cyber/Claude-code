@@ -110,6 +110,8 @@ python3 tools/generate_textures.py   # 重新生成全部贴图（需要 Pillow�
 * 本模组不注入自然刷怪表：全部实体由导演系统或命令生成，因此不会与其他模组的刷怪逻辑冲突。
 * `build.gradle` 末尾把资源输出目录合并到类目录：在本构建环境中，FML 在开发运行时只扫描 `MOD_CLASSES` 的第一个条目，
   不合并就找不到 `@Mod` 类。对发布的 jar 没有影响。
+* Forge 1.21.1 运行时使用官方（Mojang）名称，所以 `build.gradle` 禁用了 `reobfJar`：重混淆成 SRG 名的 jar 会在正式环境报
+  `NoSuchFieldError`（我自己踩过）。发布前已用 Forge 官方安装器装的真实服务端验证过 jar 能加载。
 
 ## 安装
 
