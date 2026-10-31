@@ -344,7 +344,8 @@ public final class DreadDirector {
 			return false;
 		}
 
-		float yaw = (float) Math.toDegrees(Math.atan2(facing.getX() - x, -(facing.getZ() - z)));
+		// Minecraft yaw 0 faces +Z; a direction (dx, dz) has yaw atan2(-dx, dz).
+		float yaw = (float) Math.toDegrees(Math.atan2(-(facing.getX() - x), facing.getZ() - z));
 		entity.moveTo(x, y, z, yaw, 0.0F);
 		return level.addFreshEntity(entity);
 	}

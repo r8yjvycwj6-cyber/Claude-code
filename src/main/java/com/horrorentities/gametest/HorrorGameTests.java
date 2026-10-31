@@ -330,4 +330,16 @@ public class HorrorGameTests {
 		helper.assertTrue(DreadDirector.clearAll(level) >= DreadDirector.ENTITY_NAMES.length, "clearAll removed too few");
 		helper.succeed();
 	}
+
+	@GameTest(batch = "spawnedFacePlayer", template = EMPTY, timeoutTicks = 60)
+	public static void commandSpawnedEntitiesFaceThePlayer(GameTestHelper helper) {
+		ServerLevel level = helper.getLevel();
+		ServerPlayer player = player(helper, 1.5, 1.5); // facing +Z, so the entity appears south of the player
+		helper.assertTrue(DreadDirector.spawnInFront(level, player, "gaunt", 6.0), "could not spawn");
+
+		GauntEntity gaunt = level.getEntitiesOfClass(GauntEntity.class, player.getBoundingBox().inflate(10.0)).get(0);
+		float offByFromNorth = Math.abs(net.minecraft.util.Mth.wrapDegrees(gaunt.getYRot() - 180.0F));
+		helper.assertTrue(offByFromNorth < 5.0F, "entity should face the player (yaw 180) but has yaw " + gaunt.getYRot());
+		helper.succeed();
+	}
 }

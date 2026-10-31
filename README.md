@@ -78,6 +78,16 @@
 | `enableTraces` | `true` | Hollow 留下下界岩+红石火把 |
 | `maxEntitiesPerPlayer` | `2` | 每名玩家附近同时存在的恐怖实体上限 |
 
+## 截图
+
+在 Xvfb + Mesa 软件渲染下用真实 1.21.1 客户端连开发服务器截取（均为夜晚）：
+
+| | |
+| --- | --- |
+| ![实体](docs/screenshots/entities-night.png) | ![物品](docs/screenshots/items-in-hand.png) |
+
+左：潜行者（背面）、拟态者、瘦骨者、暗影——眼睛在黑暗中发光；右：手持物品的模型与贴图。
+
 ## 构建与测试
 
 需要 JDK 21。
@@ -90,9 +100,9 @@
 python3 tools/generate_textures.py   # 重新生成全部贴图（需要 Pillow）
 ```
 
-`runGameTestServer` 使用 Forge GameTest 在真实服务端里跑 12 个行为测试：潜行者冻结/逼近/单次攻击后消失、
+`runGameTestServer` 使用 Forge GameTest 在真实服务端里跑 13 个行为测试：潜行者冻结/逼近/单次攻击后消失、
 空洞之影被注视消失与无敌、拟态者休眠与暴露、瘦骨者锁定玩家与守护符驱散、日光灼烧、暗影怕光与手持火把、
-掉落、配方加载、导演 API（恐惧值、熄灯、生成、清除）。测试代码在 `com.horrorentities.gametest`，不会打进发布的 jar。
+掉落、配方加载、导演 API（恐惧值、熄灯、生成、清除）、命令生成的实体朝向玩家。测试代码在 `com.horrorentities.gametest`，不会打进发布的 jar。
 
 说明：
 
