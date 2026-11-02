@@ -2,7 +2,7 @@ package com.horrorentities;
 
 import com.horrorentities.client.ClientSetup;
 import com.horrorentities.command.HorrorCommand;
-import com.horrorentities.director.DreadDirector;
+import com.horrorentities.director.StalkerDirector;
 import com.horrorentities.registry.ModEntities;
 import com.horrorentities.registry.ModItems;
 import com.mojang.logging.LogUtils;
@@ -33,7 +33,9 @@ public class HorrorEntities {
 
 		context.registerConfig(ModConfig.Type.COMMON, HorrorConfig.SPEC);
 
-		MinecraftForge.EVENT_BUS.addListener(DreadDirector::onServerTick);
+		MinecraftForge.EVENT_BUS.addListener(StalkerDirector::onServerTick);
+		MinecraftForge.EVENT_BUS.addListener(StalkerDirector::onEntityJoin);
+		MinecraftForge.EVENT_BUS.addListener(StalkerDirector::onSleep);
 		MinecraftForge.EVENT_BUS.addListener((RegisterCommandsEvent event) -> HorrorCommand.register(event.getDispatcher()));
 
 		if (FMLEnvironment.dist == Dist.CLIENT) {

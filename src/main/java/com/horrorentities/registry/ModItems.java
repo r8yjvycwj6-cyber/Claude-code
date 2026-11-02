@@ -28,10 +28,6 @@ public final class ModItems {
 			() -> new WardingCharmItem(new Item.Properties().durability(400)));
 
 	public static final RegistryObject<Item> STALKER_SPAWN_EGG = egg("stalker", ModEntities.STALKER, 0x0b0b0f, 0xd9d9d9);
-	public static final RegistryObject<Item> HOLLOW_SPAWN_EGG = egg("hollow", ModEntities.HOLLOW, 0x3a6ea5, 0xffffff);
-	public static final RegistryObject<Item> MIMIC_SPAWN_EGG = egg("mimic", ModEntities.MIMIC, 0x6b6a4a, 0xb22222);
-	public static final RegistryObject<Item> GAUNT_SPAWN_EGG = egg("gaunt", ModEntities.GAUNT, 0x4d4d4d, 0xe8e0a0);
-	public static final RegistryObject<Item> SHADE_SPAWN_EGG = egg("shade", ModEntities.SHADE, 0x000000, 0x5b2a86);
 
 	public static final RegistryObject<CreativeModeTab> MAIN_TAB = TABS.register("main", () -> CreativeModeTab.builder()
 			.title(Component.translatable("itemGroup." + HorrorEntities.MOD_ID + ".main"))
@@ -41,10 +37,6 @@ public final class ModItems {
 				output.accept(WARDING_CHARM.get());
 				output.accept(GREATER_WARDING_CHARM.get());
 				output.accept(STALKER_SPAWN_EGG.get());
-				output.accept(HOLLOW_SPAWN_EGG.get());
-				output.accept(MIMIC_SPAWN_EGG.get());
-				output.accept(GAUNT_SPAWN_EGG.get());
-				output.accept(SHADE_SPAWN_EGG.get());
 			})
 			.build());
 

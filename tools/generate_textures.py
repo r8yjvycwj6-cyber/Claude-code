@@ -68,89 +68,8 @@ def stalker(rng):
     return img, eyes_layer(EYES, (235, 240, 255))
 
 
-def hollow(rng):
-    img = new_skin()
-    skin = (198, 134, 101, 255)
-    fill(img, HEAD, skin, 8, rng)
-    fill(img, BODY, (0, 168, 168, 255), 8, rng)
-    fill(img, ARMS, (0, 168, 168, 255), 8, rng)
-    fill(img, LEGS, (58, 58, 150, 255), 8, rng)
-    # hair: top row of the head and the back of it
-    fill(img, (8, 0, 16, 8), (70, 44, 24, 255), 8, rng)
-    fill(img, (24, 8, 32, 16), (70, 44, 24, 255), 8, rng)
-    for x0 in (0, 16):
-        fill(img, (x0, 8, x0 + 8, 10), (70, 44, 24, 255), 8, rng)
-    fill(img, (8, 8, 16, 10), (70, 44, 24, 255), 8, rng)
-    # forearms and shoes
-    rect(img, (40, 28, 56, 32), skin)
-    rect(img, (0, 30, 16, 34), (90, 90, 90, 255))
-    # white, pupil-less eyes
-    for box in EYES:
-        rect(img, box, (255, 255, 255, 255))
-    rect(img, (11, 14, 13, 15), (150, 96, 70, 255))
-    return img, eyes_layer(EYES, (255, 255, 255))
-
-
-def mimic(rng):
-    img = new_skin()
-    skin = (168, 158, 128, 255)
-    robe = (92, 66, 48, 255)
-    fill(img, HEAD, skin, 8, rng)
-    fill(img, BODY, robe, 9, rng)
-    fill(img, ARMS, robe, 9, rng)
-    fill(img, LEGS, shade(robe, -22), 9, rng)
-    rect(img, (40, 28, 56, 32), skin)
-    # a grin that is too wide, and mismatched eyes
-    rect(img, (8, 14, 16, 16), (30, 18, 18, 255))
-    for x in range(8, 16, 2):
-        rect(img, (x, 14, x + 1, 15), (225, 220, 205, 255))
-    eyes = [(9, 11, 12, 14), (13, 12, 15, 14)]
-    for box in eyes:
-        rect(img, (box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 1), (30, 22, 16, 255))
-        rect(img, box, (235, 215, 140, 255))
-    # belt and patched cloth
-    rect(img, (20, 28, 28, 29), (50, 36, 26, 255))
-    fill(img, (22, 22, 25, 25), shade(robe, 28), 6, rng)
-    return img, eyes_layer([(9, 11, 12, 14), (13, 12, 15, 14)], (255, 232, 150))
-
-
-def gaunt(rng):
-    img = new_skin()
-    skin = (150, 152, 140, 255)
-    fill(img, HEAD, skin, 7, rng)
-    fill(img, BODY, skin, 7, rng)
-    fill(img, ARMS, shade(skin, -10), 7, rng)
-    fill(img, LEGS, shade(skin, -14), 7, rng)
-    # ribs on chest and back
-    for y in range(21, 31, 2):
-        rect(img, (21, y, 27, y + 1), shade(skin, -48))
-        rect(img, (33, y, 39, y + 1), shade(skin, -48))
-    # joints and bony knuckles
-    for y in (23, 29):
-        rect(img, (40, y, 56, y + 1), shade(skin, -40))
-    rect(img, (0, 24, 16, 25), shade(skin, -40))
-    # sunken sockets and a gaping mouth
-    for box in EYES:
-        rect(img, (box[0] - 1, box[1] - 1, box[2] + 1, box[3] + 2), (14, 14, 12, 255))
-    rect(img, (10, 14, 14, 16), (14, 8, 8, 255))
-    return img, eyes_layer(EYES, (240, 232, 140))
-
-
-def shade_entity(rng):
-    img = new_skin()
-    base = (8, 8, 12, 255)
-    for region in (HEAD, BODY, ARMS, LEGS):
-        fill(img, region, base, 4, rng)
-    slits = [(9, 12, 11, 13), (13, 12, 15, 13)]
-    return img, eyes_layer(slits, (255, 255, 255))
-
-
 ENTITIES = {
     "stalker": stalker,
-    "hollow": hollow,
-    "mimic": mimic,
-    "gaunt": gaunt,
-    "shade": shade_entity,
 }
 
 

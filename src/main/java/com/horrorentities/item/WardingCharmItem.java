@@ -2,7 +2,7 @@ package com.horrorentities.item;
 
 import java.util.List;
 
-import com.horrorentities.entity.HorrorMob;
+import com.horrorentities.entity.StalkerEntity;
 
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -13,8 +13,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
 /**
- * Hold it in either hand and the things in the dark lose interest in you.
- * Every few seconds spent actually near one of them costs a point of durability.
+ * Hold it in either hand and the Stalker loses interest in you (and you can sleep again).
+ * Every few seconds spent actually near the Stalker costs a point of durability.
  */
 public class WardingCharmItem extends Item {
 	private static final double WARD_RADIUS = 10.0;
@@ -40,7 +40,7 @@ public class WardingCharmItem extends Item {
 			return;
 		}
 
-		List<Entity> nearby = level.getEntitiesOfClass(Entity.class, player.getBoundingBox().inflate(WARD_RADIUS), e -> e instanceof HorrorMob);
+		List<Entity> nearby = level.getEntitiesOfClass(Entity.class, player.getBoundingBox().inflate(WARD_RADIUS), e -> e instanceof StalkerEntity);
 
 		if (!nearby.isEmpty()) {
 			stack.hurtAndBreak(1, player, inOffhand ? EquipmentSlot.OFFHAND : EquipmentSlot.MAINHAND);
