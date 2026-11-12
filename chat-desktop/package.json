@@ -1,0 +1,62 @@
+{
+  "name": "securechat-desktop",
+  "productName": "SecureChat",
+  "version": "1.0.0",
+  "description": "SecureChat 桌面客户端（仿 WhatsApp 界面，端到端加密）",
+  "main": "main.js",
+  "author": "SecureChat",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "sync-crypto": "node scripts/sync-crypto.js",
+    "prestart": "node scripts/sync-crypto.js --check",
+    "predist": "node scripts/sync-crypto.js --check",
+    "dist": "electron-builder --win nsis portable --x64",
+    "dist:dir": "electron-builder --win dir --x64",
+    "test": "node scripts/sync-crypto.js --check && node test/ui.e2e.js && node test/electron.e2e.js"
+  },
+  "build": {
+    "appId": "com.securechat.desktop",
+    "productName": "SecureChat",
+    "copyright": "SecureChat",
+    "publish": null,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "build/icon.png",
+      "build/tray.png"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SecureChat",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052",
+      "artifactName": "SecureChat-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "SecureChat-Portable-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.3.1",
+    "electron-builder": "^26.0.0"
+  }
+}

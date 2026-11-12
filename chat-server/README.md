@@ -303,4 +303,4 @@ chat-server/
 * 注册没有短信验证码（需要接入短信服务商），目前用手机号 + 密码。
 * 推送通知（App 不在前台时）需要接入 FCM / APNs，后续做移动端时再加。
 * 语音 / 视频通话需要 WebRTC 信令 + TURN 服务器，后续可以复用 WebSocket 通道实现。
-* 下一步：WhatsApp 风格的 Web 界面（放到 `public/`）。
+* 电脑客户端（WhatsApp 风格界面）在 `../chat-desktop/`。如果限定了 `corsOrigins`，需要加入 `app://securechat`。

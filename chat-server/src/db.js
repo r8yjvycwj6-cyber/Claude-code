@@ -15,7 +15,7 @@ function openDb(dataDir) {
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       phone         TEXT NOT NULL UNIQUE,
       name          TEXT NOT NULL,
-      about         TEXT NOT NULL DEFAULT 'Hey there! I am using Chat.',
+      about         TEXT NOT NULL DEFAULT '你好，我正在使用 SecureChat。',
       avatar        TEXT,
       pass_hash     TEXT NOT NULL,
       created_at    INTEGER NOT NULL,
