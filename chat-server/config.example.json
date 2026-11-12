@@ -1,0 +1,19 @@
+{
+  "host": "0.0.0.0",
+  "port": 3000,
+  "dataDir": "data",
+
+  "tlsPfx": "",
+  "tlsPassphrase": "",
+  "tlsCert": "",
+  "tlsKey": "",
+
+  "corsOrigins": "*",
+  "trustProxy": "false",
+
+  "tokenTtlDays": 30,
+  "maxMediaMB": 64,
+  "mediaTtlDays": 30,
+  "queueTtlDays": 30,
+  "maxGroupSize": 256
+}
