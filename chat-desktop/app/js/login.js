@@ -2,12 +2,13 @@
 import { h } from './dom.js';
 import { icon } from './icons.js';
 import { ChatCore } from './core.js';
+import { DEFAULT_SERVER } from './config.js';
 
 function lastServer() {
   try {
-    return localStorage.getItem('lastServer') || 'http://localhost:3000';
+    return localStorage.getItem('lastServer') || DEFAULT_SERVER;
   } catch {
-    return 'http://localhost:3000';
+    return DEFAULT_SERVER;
   }
 }
 function rememberServer(s) {
@@ -18,7 +19,27 @@ function rememberServer(s) {
 
 export function renderLogin(root, { onLoggedIn, reason }) {
   let mode = 'login';
-  const server = h('input', { name: 'server', value: lastServer(), placeholder: '例如 http://192.168.1.10:3000', autocomplete: 'off', spellcheck: false });
+  const server = h('input', { name: 'server', value: lastServer(), placeholder: DEFAULT_SERVER, autocomplete: 'off', spellcheck: false });
+  const shownHost = () => {
+    try {
+      return new URL(server.value.includes('://') ? server.value : `https://${server.value}`).host;
+    } catch {
+      return server.value;
+    }
+  };
+  // 服务器地址默认隐藏（内置 neonhost.top），点"更改"才显示输入框
+  const custom = server.value !== DEFAULT_SERVER;
+  const serverField = h('div', { class: `field server-field ${custom ? '' : 'collapsed'}` },
+    h('label', {}, '服务器地址'), server,
+    h('div', { class: 'hint' }, '支持域名、IPv4、IPv6（如 [240e::1]:8443）。不写 http:// 时默认使用加密的 https。',
+      ' ', h('button', { type: 'button', class: 'link', onClick: () => { server.value = DEFAULT_SERVER; serverLine.firstChild.textContent = `服务器：${shownHost()}`; } }, '恢复默认')));
+  const serverLine = h('div', { class: `server-line ${custom ? 'collapsed' : ''}` },
+    h('span', {}, `服务器：${shownHost()}`),
+    h('button', { type: 'button', class: 'link', onClick: () => {
+      serverField.classList.remove('collapsed');
+      serverLine.classList.add('collapsed');
+      setTimeout(() => server.focus(), 200);
+    } }, '更改'));
   const phone = h('input', { name: 'phone', type: 'tel', placeholder: '+86 138 0000 0000', autocomplete: 'username' });
   const name = h('input', { name: 'name', placeholder: '别人看到的名字', maxLength: 50 });
   const password = h('input', { name: 'password', type: 'password', placeholder: '至少 8 位', autocomplete: 'current-password' });
@@ -70,7 +91,8 @@ export function renderLogin(root, { onLoggedIn, reason }) {
     }
   } },
     h('div', { class: 'tabs' }, tabLogin, tabReg),
-    h('div', { class: 'field' }, h('label', {}, '服务器地址'), server),
+    serverLine,
+    serverField,
     h('div', { class: 'field' }, h('label', {}, '手机号'), phone),
     nameField,
     h('div', { class: 'field' }, h('label', {}, '密码'), password),
@@ -92,8 +114,8 @@ export function renderLogin(root, { onLoggedIn, reason }) {
           h('div', {},
             h('h1', {}, '在电脑上使用 SecureChat'),
             h('ol', { class: 'login-steps' },
-              h('li', {}, '填写你的', h('b', {}, '聊天服务器地址'), '（问服务器管理员要）'),
               h('li', {}, '已有账号直接', h('b', {}, '登录'), '，没有就先', h('b', {}, '注册')),
+              h('li', {}, '通过', h('b', {}, '加密连接'), '（HTTPS，支持 IPv6）连接 neonhost.top'),
               h('li', {}, '加密密钥会在', h('b', {}, '本机自动生成'), '，并用 Windows 账户加密保存')
             ),
             h('div', { class: 'login-note' }, icon('lock', 18),
@@ -104,5 +126,5 @@ export function renderLogin(root, { onLoggedIn, reason }) {
       )
     )
   );
-  (server.value ? phone : server).focus();
+  phone.focus();
 }

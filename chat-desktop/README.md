@@ -2,6 +2,10 @@
 
 `chat-server` 的电脑客户端：仿 WhatsApp 桌面版的界面，端到端加密。基于 Electron，安装包就是一个普通的 Windows 程序。
 
+**内置服务器：`https://neonhost.top:8443`**（HTTPS 加密连接，IPv6 / IPv4 都支持）。打开就能注册登录，不需要填写服务器地址；
+如需连接别的服务器（例如局域网测试），在登录页点"服务器：… 更改"。地址可以写域名、IPv4 或 IPv6（如 `[240e:3b4::1]:8443`），
+不写 `http://` 时默认使用 https。内置地址定义在 `app/js/config.js`。
+
 ## 功能
 
 * 注册 / 登录（填写自己的服务器地址），重新打开自动登录
@@ -14,6 +18,19 @@
 * 离线发件箱：断网时写的消息会在重新连上后自动加密发送
 * 浅色 / 深色主题（默认跟随系统）、拖拽或粘贴（Ctrl+V）发送文件、Ctrl+N 新聊天
 * 关闭窗口最小化到托盘，托盘菜单"退出"才真正退出
+
+## 动画与流畅度
+
+* 新消息从气泡尾巴一侧弹入；✓ → ✓✓ → 蓝色勾号原地变化并轻弹一下（不重建整条消息）
+* 会话列表有新消息时，会话**平滑移动**到顶部（FLIP 动画），其余会话跟着下移；未读角标弹出
+* "正在输入"显示跳动的三个点；发送按钮在有内容时变色弹起
+* 侧边面板、右侧信息面板（宽屏时把聊天区推开）、菜单、弹窗、表情面板、图片查看器、提示都有进场和退场动画
+* 图片从模糊缩略图过渡到清晰原图；按钮按下有回弹
+* 动画只改变 transform / opacity（由 GPU 合成）；会话列表按 id 复用节点，只更新变化的行
+* 遵循 Windows"显示动画"设置（系统关闭动画时自动关闭）
+
+实测（`node test/smoothness.js`）：12 个联系人以每秒 10 条的速度发加密消息、列表不停重排时，
+**530 帧中 0 帧掉帧，每帧 16.7ms（稳定 60fps），无超过 50ms 的主线程任务**；反复开关信息面板同样 0 掉帧。
 
 ## 安全设计
 
@@ -28,10 +45,10 @@
 
 ## 直接使用
 
-运行 `SecureChat-Setup-1.0.0.exe` 安装（可选择安装目录，会创建桌面和开始菜单快捷方式），
-或者使用免安装的 `SecureChat-Portable-1.0.0.exe`。
+运行 `SecureChat-Setup-1.1.0.exe` 安装（可选择安装目录，会创建桌面和开始菜单快捷方式），
+或者使用免安装的 `SecureChat-Portable-1.1.0.exe`。
 
-首次打开时填写服务器地址，例如 `http://192.168.1.10:3000`（服务器部署见 `../chat-server/README.md`）。
+打开后直接注册 / 登录即可（服务器部署见 `../chat-server/README.md`）。
 
 > 安装包没有代码签名，Windows SmartScreen 可能提示"未知发布者"，点"更多信息 → 仍要运行"即可。
 > 正式分发时建议购买代码签名证书，在 `package.json` 的 `build.win` 中配置。
@@ -44,7 +61,7 @@
 cd chat-desktop
 npm install
 npm start            :: 开发运行
-npm run dist         :: 生成 dist\SecureChat-Setup-1.0.0.exe 和 dist\SecureChat-Portable-1.0.0.exe
+npm run dist         :: 生成 dist\SecureChat-Setup-1.1.0.exe 和 dist\SecureChat-Portable-1.1.0.exe
 ```
 
 `npm run dist:dir` 只生成免安装的 `dist\win-unpacked\` 目录（最快，适合调试）。
@@ -58,7 +75,8 @@ npx electron . --securechat-profile=%TEMP%\securechat-test2
 ## 测试
 
 ```bash
-npm test   # 加密库一致性检查 + 浏览器界面端到端测试（3 个用户）+ 真实 Electron 测试
+npm test                 # 加密库一致性检查 + 浏览器界面端到端测试（3 个用户）+ 真实 Electron 测试
+node test/smoothness.js  # 流畅度（帧间隔）测量
 ```
 
 Linux 无显示器时 Electron 测试需要 `xvfb-run -a node test/electron.e2e.js`。

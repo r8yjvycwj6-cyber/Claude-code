@@ -1,6 +1,6 @@
 # 聊天服务器（仿 WhatsApp，端到端加密）
 
-聊天软件的后端。UI 之后按 WhatsApp 风格来做，前端做好后放进 `public/` 目录即可由本服务直接托管。
+聊天软件的后端。电脑客户端在 `../chat-desktop/`，内置服务器地址 `https://neonhost.top:8443`。
 
 * **端到端加密**：X3DH 密钥协商 + Double Ratchet 双棘轮 + AES-256-GCM，与 Signal / WhatsApp 的思路相同。
   **服务器只保存公钥和密文，没有能力解密任何消息或附件。**
@@ -8,60 +8,106 @@
 * 联系人、屏蔽、头像、个人签名、加密的图片 / 语音 / 视频 / 文件
 * "安全码已更改"通知、60 位安全码核对
 * **Windows 服务器开箱即用**：只依赖 Node.js，数据库用 Node 内置的 SQLite，不需要编译任何原生模块，不需要单独安装数据库
+* **IPv6 + IPv4 双栈**，HTTPS 证书续期后自动热更新
+* 单进程约可承载 **1 万同时在线**用户（压测数据见下文）
 
 ---
 
-## 一、在 Windows 服务器上部署
+## 一、在 Windows 服务器上部署（neonhost.top:8443）
+
+客户端内置的服务器地址是 **`https://neonhost.top:8443`**。服务器同时监听 **IPv6 和 IPv4**（双栈），
+用 8443 端口是为了避开家庭宽带对 80/443 的封锁。
+
+```
+ 客户端 ──► DNS 查询 neonhost.top ──► AAAA 记录（IPv6）/ A 记录（IPv4）
+        ──► https://[服务器 IPv6]:8443 ──► 光猫/路由器（需放行 IPv6 入站）──► Windows 防火墙（8443）──► 本服务
+```
 
 ### 1. 安装 Node.js
 
 到 <https://nodejs.org/> 下载 **Node.js 22 LTS（22.13 以上）或 24 LTS** 的 Windows 安装包（.msi），一路下一步即可。
 
-### 2. 启动
+### 2. 域名解析（IPv6）
 
-把 `chat-server` 文件夹复制到服务器上（例如 `C:\chat-server`），然后**双击 `start.bat`**。
-第一次会自动安装依赖。看到下面的输出就说明成功了：
+1. 在服务器上运行 `ipconfig`，找到网卡下的 **"IPv6 地址"**（以 2 或 3 开头，例如 `240e:3b4:...`）。
+   **不要用"临时 IPv6 地址"**，它每天都会变。启动本服务时也会打印出本机的公网 IPv6 地址。
+2. 在 neonhost.top 的 DNS 服务商那里添加记录：`AAAA  neonhost.top → 上面的 IPv6 地址`。
+   如果服务器也有公网 IPv4，再加一条 `A` 记录；只有 IPv6 也可以。
+3. **家庭宽带的 IPv6 前缀会定期变化**，需要动态域名（DDNS）自动更新 AAAA 记录。推荐
+   [ddns-go](https://github.com/jeessy2/ddns-go)（有 Windows 版，支持阿里云、腾讯云 DNSPod、Cloudflare 等），
+   设置里选择 IPv6、"通过网卡获取"，并选中上面那个固定的 IPv6 地址。
+
+### 3. 申请 HTTPS 证书（Let's Encrypt，免费，自动续期）
+
+使用 [win-acme](https://www.win-acme.com/)（Windows 上最常用的证书工具）：
+
+1. 下载解压 win-acme，**以管理员身份**运行 `wacs.exe`。
+2. 选择创建证书的完整选项（full options）→ 手动输入域名 `neonhost.top`。
+3. **验证方式选 DNS 验证**（家庭宽带的 80 端口通常被封，HTTP 验证会失败）：
+   * 优先选择你的 DNS 服务商对应的插件（如 Cloudflare、阿里云等），填入 API 密钥，以后可以**全自动续期**；
+   * 如果没有对应插件，可选"手动创建 DNS 记录"，但每次续期（约 60 天一次）都要手动添加一次 TXT 记录。
+   * 如果你的 80 端口是通的，也可以选"自托管 HTTP 验证"（self-hosting）。
+4. 证书保存方式选 **PFX 文件**，保存到 `C:\chat-server\certs\`，并设置一个 PFX 密码。
+5. win-acme 会自动创建续期计划任务。续期后本服务会在 30 秒内**自动换用新证书，不需要重启**，在线用户也不会掉线。
+
+（菜单的具体文字以 win-acme 实际界面为准；生成的文件名一般是 `neonhost.top.pfx`。）
+
+### 4. 配置
+
+复制 `config.example.json` 为 `config.json`，把 `tlsPfx` 改成实际的证书文件路径，`tlsPassphrase` 填 PFX 密码。
+
+### 5. 启动
+
+把 `chat-server` 文件夹复制到服务器上（例如 `C:\chat-server`），然后**双击 `start.bat`**。第一次会自动安装依赖。正常输出：
 
 ```
-聊天服务器已启动: http://localhost:3000
-WebSocket:        ws://localhost:3000/ws
+已加载 HTTPS 证书
+聊天服务器已启动: https://localhost:8443
+WebSocket:        wss://localhost:8443/ws
+监听地址:         [::]:8443（IPv6 + IPv4 双栈）
+对外地址:         https://neonhost.top:8443
+本机公网 IPv6:
+                  240e:3b4:xxxx:xxxx::xxxx（以太网）
 ```
 
-浏览器打开 <http://localhost:3000/api/health> 应返回 `{"ok":true,...}`。
+* 如果系统没有启用 IPv6，会提示"本机不支持 IPv6，改为只监听 IPv4"，此时只能通过 IPv4 访问。
+* 证书文件不存在或密码错误时服务**不会启动**（不会悄悄退回不加密的 HTTP）。
 
-也可以用命令行：
+### 6. 放行端口（三处都要放行）
 
-```bat
-cd C:\chat-server
-npm install --omit=dev
-npm start
-```
+1. **Windows 防火墙**：右键 `scripts\open-firewall.bat` → 以管理员身份运行（默认放行 8443，IPv4/IPv6 同时生效）。
+2. **光猫 / 路由器的 IPv6 防火墙**：大多数家用光猫默认拦截所有 IPv6 入站连接。
+   进入光猫管理页面（常见 192.168.1.1），在"安全 / 防火墙"里关闭 IPv6 防火墙或"IPv6 会话保护"，
+   或者为服务器放行 TCP 8443（不同型号叫法不同，部分运营商光猫需要超级管理员账号）。
+   如果光猫是桥接模式、由路由器拨号，则在路由器里设置。
+3. **云服务器**：在控制台的安全组里放行 TCP 8443（IPv4 和 IPv6 规则都要加）。
 
-### 3. 放行防火墙端口
+**验证**：手机关掉 Wi-Fi 用流量（国内移动网络基本都有 IPv6），浏览器打开
+<https://neonhost.top:8443/api/health>，看到 `{"ok":true,...}` 就说明外网可以访问了。
+也可以在 <https://ipw.cn> 之类的网站测试 IPv6 端口连通性。
 
-右键 `scripts\open-firewall.bat` →“以管理员身份运行”（默认放行 3000，其它端口：`open-firewall.bat 8443`）。
-如果是云服务器（阿里云 / 腾讯云 / Azure 等），还需要在云控制台的**安全组**里放行同一个端口。
+### 7. 开机自启、崩溃自动重启
 
-### 4. 开机自启、崩溃自动重启
-
-右键 `scripts\install-service.bat` →“以管理员身份运行”。它会创建一个名为 `ChatServer` 的计划任务，
+右键 `scripts\install-service.bat` → 以管理员身份运行。它会创建一个名为 `ChatServer` 的计划任务，
 开机时以 SYSTEM 身份在后台运行，进程退出 5 秒后自动重启，日志写到 `data\server.log`。
 
 * 停止：`schtasks /End /TN ChatServer`
 * 卸载：右键 `scripts\uninstall-service.bat` → 以管理员身份运行
 
-### 5. 配置
+### 8. 全部配置项
 
-复制 `config.example.json` 为 `config.json` 后修改，重启生效。也可以用环境变量（括号内）覆盖：
+`config.json` 修改后重启生效。也可以用环境变量（括号内）覆盖：
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `host` (`CHAT_HOST`) | `0.0.0.0` | 监听地址 |
-| `port` (`CHAT_PORT`) | `3000` | 端口 |
+| `domain` (`CHAT_DOMAIN`) | 空 | 对外域名，只用于启动时显示 |
+| `host` (`CHAT_HOST`) | `::` | 监听地址。`::` = IPv6 + IPv4 双栈；不支持 IPv6 时自动退回 `0.0.0.0` |
+| `port` (`CHAT_PORT`) | 有证书时 `8443`，否则 `3000` | 端口 |
 | `dataDir` (`CHAT_DATA_DIR`) | `data` | 数据目录（数据库、密文附件、头像、日志） |
-| `tlsPfx` / `tlsPassphrase` | 空 | HTTPS 证书（Windows 常用的 .pfx） |
+| `tlsPfx` / `tlsPassphrase` | 空 | HTTPS 证书（.pfx 及其密码） |
 | `tlsCert` / `tlsKey` | 空 | 或者 PEM 格式证书 + 私钥 |
-| `corsOrigins` | `*` | 允许跨域的前端地址，逗号分隔 |
+| `tlsWatchMs` | `30000` | 多久检查一次证书文件是否更新（毫秒） |
+| `corsOrigins` | `*` | 允许跨域的前端地址，逗号分隔。桌面客户端的来源是 `app://securechat` |
 | `trustProxy` | `false` | 放在 IIS / Nginx 反向代理后面时设为 `true` |
 | `tokenTtlDays` | `30` | 登录有效期（天） |
 | `maxMediaMB` | `64` | 单个附件上限 |
@@ -69,20 +115,38 @@ npm start
 | `queueTtlDays` | `30` | 离线消息保留天数（对方一直不上线就丢弃） |
 | `maxGroupSize` | `256` | 群成员上限 |
 
-### 6. HTTPS（正式使用必须开）
+### 9. 性能与容量
 
-端到端加密保护的是消息内容，但登录密码、令牌仍然需要 HTTPS 保护，而且浏览器只在 HTTPS 下提供加密所需的 WebCrypto。
+为承载更多用户做的优化：
 
-* **有域名**：用 [win-acme](https://www.win-acme.com/) 免费申请 Let's Encrypt 证书并导出 `.pfx`，
-  然后在 `config.json` 中设置 `"tlsPfx": "C:/certs/chat.pfx"`、`"tlsPassphrase": "..."`、`"port": 443`。
-* 或者放在 IIS（ARR + URL Rewrite，需要开启 WebSocket 功能）/ Nginx for Windows 后面，由它们处理 HTTPS，并把 `trustProxy` 设为 `true`。
+* **组提交**：同一轮事件循环里的所有数据库写入合并成一个事务一次提交（之前每条消息单独提交，54% 的 CPU 花在提交上）；
+* SQLite WAL + `synchronous=NORMAL`、64MB 缓存、内存映射；预编译语句缓存；
+* 密码哈希（scrypt）移到线程池，登录高峰不会卡住消息收发；登录令牌校验结果缓存 60 秒；
+* 同一连接一轮内的多帧合并成一次系统调用写出（cork）；消息只序列化一次；确认收到时不再解析密文；
+* 登录 / 注册限流按来源区分：IPv4 按地址，**IPv6 按 /64 网段**（防止攻击者换地址绕过）。
 
-### 7. 备份
+压测结果（`bench/load.js`，单个服务器进程、单核，4 核 Linux 虚拟机，消息约 400 字节，1/10 是 20 人群消息）：
+
+| 场景 | 投递量 | 延迟 p50 / p99 | 服务器内存 |
+| --- | --- | --- | --- |
+| 优化前：2000 人在线，每秒 4000 条 | 2,684 条/秒（**积压，近一半未送达**） | 6.4 秒 / 26.9 秒 | 139 MB |
+| 优化后：同上 | 10,838 条/秒（全部送达） | 103 毫秒 / 345 毫秒 | 129 MB |
+| 优化后：10,000 人在线（WSS 加密），每人每 5 秒发一条 | 5,358 条/秒（全部送达） | 6 毫秒 / 28 毫秒 | 769 MB |
+| 优化后：2000 人在线（WSS 加密），满负荷 | 11,905 条/秒（全部送达） | 150 毫秒 / 368 毫秒 | 350 MB |
+
+单进程单核即可承载约 1 万同时在线用户；TLS 连接每个约占 70KB 内存。
+Windows 服务器的实际数字会因 CPU 和磁盘不同而有差异，可以在服务器上自己跑：
+
+```bat
+node bench/load.js --clients 5000 --rate 0.2 --duration 20
+```
+
+### 10. 备份
 
 停止服务后备份整个 `data` 目录即可（`chat.db`、`chat.db-wal`、`media\`、`avatars\`）。
 服务器上没有用户的私钥，备份泄露也无法解密聊天内容。
 
-### 8. 运行测试
+### 11. 运行测试
 
 ```bat
 npm install

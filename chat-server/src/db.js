@@ -6,10 +6,29 @@ const { DatabaseSync } = require('node:sqlite');
 
 function openDb(dataDir) {
   const db = new DatabaseSync(dataDir === ':memory:' ? ':memory:' : path.join(dataDir, 'chat.db'));
+
+  // 预编译语句缓存：同一条 SQL 只编译一次（路由里大量临时 prepare 的开销就没了）
+  const rawPrepare = db.prepare.bind(db);
+  const stmtCache = new Map();
+  db.prepare = (sql) => {
+    let s = stmtCache.get(sql);
+    if (!s) stmtCache.set(sql, (s = rawPrepare(sql)));
+    return s;
+  };
+
+  // 性能设置：
+  //   WAL + synchronous=NORMAL：每次提交不再 fsync（只在检查点时刷盘），写入速度提升数十倍；
+  //   断电时最多丢失最近一瞬间的提交，但数据库不会损坏。
+  //   64MB 页缓存 + 256MB 内存映射读取。
   db.exec(`
     PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 5000;
+    PRAGMA cache_size = -65536;
+    PRAGMA temp_store = MEMORY;
+    PRAGMA mmap_size = 268435456;
+    PRAGMA wal_autocheckpoint = 4000;
 
     CREATE TABLE IF NOT EXISTS users (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +112,7 @@ function openDb(dataDir) {
       created_at    INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_queue_recipient ON queue(recipient_id, id);
+    CREATE INDEX IF NOT EXISTS idx_queue_created ON queue(created_at);
 
     -- 媒体文件：客户端加密后上传的二进制密文，服务器不知道内容和密钥
     CREATE TABLE IF NOT EXISTS media (
@@ -101,21 +121,77 @@ function openDb(dataDir) {
       size          INTEGER NOT NULL,
       created_at    INTEGER NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_media_created ON media(created_at);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
   `);
+
+  // 升级旧数据库：queue 表增加 ref / sender / group_id 列（确认收到时无需解析密文 JSON）
+  const qcols = new Set(db.prepare('PRAGMA table_info(queue)').all().map((c) => c.name));
+  if (!qcols.has('ref')) {
+    db.exec('ALTER TABLE queue ADD COLUMN ref TEXT; ALTER TABLE queue ADD COLUMN sender INTEGER; ALTER TABLE queue ADD COLUMN group_id INTEGER;');
+    db.exec(`UPDATE queue SET ref = json_extract(payload, '$.id'), sender = json_extract(payload, '$.from'),
+             group_id = json_extract(payload, '$.groupId') WHERE kind = 'message'`);
+  }
   return db;
 }
 
 // 简单事务包装
+// 事务包装。可嵌套：内层用 SAVEPOINT，内层失败只回滚内层，不影响外层。
+// 批量写入放在一个事务里，只提交一次。
 function tx(db, fn) {
+  if (db._txDepth) {
+    const sp = `sp${db._txDepth}`;
+    db.exec(`SAVEPOINT ${sp}`);
+    db._txDepth++;
+    try {
+      const r = fn();
+      db._txDepth--;
+      db.exec(`RELEASE ${sp}`);
+      return r;
+    } catch (e) {
+      db._txDepth--;
+      db.exec(`ROLLBACK TO ${sp}`);
+      db.exec(`RELEASE ${sp}`);
+      throw e;
+    }
+  }
   db.exec('BEGIN IMMEDIATE');
+  db._txDepth = 1;
   try {
     const r = fn();
+    db._txDepth = 0;
     db.exec('COMMIT');
     return r;
   } catch (e) {
+    db._txDepth = 0;
     db.exec('ROLLBACK');
     throw e;
   }
 }
 
-module.exports = { openDb, tx };
+// 组提交（group commit）：同一轮事件循环里的所有写入共用一个事务，
+// 在本轮 I/O 处理完后（setImmediate）一次性提交。高并发时把每秒上万次提交合并成几百次。
+// 在批次中调用 tx() 会自动变成 SAVEPOINT，互不影响。
+function batch(db) {
+  if (db._txDepth) return;
+  db.exec('BEGIN IMMEDIATE');
+  db._txDepth = 1;
+  db._batchOpen = true;
+  setImmediate(() => flushBatch(db));
+}
+
+function flushBatch(db) {
+  if (!db._batchOpen) return;
+  db._batchOpen = false;
+  db._txDepth = 0;
+  try {
+    db.exec('COMMIT');
+  } catch (e) {
+    console.error('[db] 批量提交失败', e);
+    try {
+      db.exec('ROLLBACK');
+    } catch {}
+  }
+}
+
+module.exports = { openDb, tx, batch, flushBatch };

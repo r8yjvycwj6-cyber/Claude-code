@@ -20,8 +20,11 @@ function pick(envName, key, def) {
 const resolveFromRoot = (p) => (p ? path.resolve(ROOT, p) : p);
 
 const config = {
-  host: pick('CHAT_HOST', 'host', '0.0.0.0'),
-  port: Number(pick('CHAT_PORT', 'port', 3000)),
+  // "::" = 同时监听 IPv6 和 IPv4（双栈）。系统没有 IPv6 时会自动退回 0.0.0.0
+  host: pick('CHAT_HOST', 'host', '::'),
+  port: 0, // 下面根据是否启用 HTTPS 决定默认值
+  // 对外使用的域名（只用于启动时提示）
+  domain: pick('CHAT_DOMAIN', 'domain', ''),
   dataDir: resolveFromRoot(pick('CHAT_DATA_DIR', 'dataDir', 'data')),
   // HTTPS（可选）。Windows 上常见的是 .pfx 证书，也支持 PEM 格式的 cert + key。
   tls: {
@@ -29,6 +32,8 @@ const config = {
     passphrase: pick('CHAT_TLS_PASSPHRASE', 'tlsPassphrase', ''),
     cert: resolveFromRoot(pick('CHAT_TLS_CERT', 'tlsCert', '')),
     key: resolveFromRoot(pick('CHAT_TLS_KEY', 'tlsKey', '')),
+    // 每隔多久检查一次证书文件是否更新（证书续期后自动生效，无需重启）
+    watchMs: Number(pick('CHAT_TLS_WATCH_MS', 'tlsWatchMs', 30000)),
   },
   // 允许跨域访问的前端地址，逗号分隔；"*" 表示全部允许
   corsOrigins: String(pick('CHAT_CORS_ORIGINS', 'corsOrigins', '*')).split(',').map((s) => s.trim()).filter(Boolean),
@@ -40,6 +45,10 @@ const config = {
   maxGroupSize: Number(pick('CHAT_MAX_GROUP_SIZE', 'maxGroupSize', 256)),
   trustProxy: String(pick('CHAT_TRUST_PROXY', 'trustProxy', 'false')) === 'true',
 };
+
+config.tls.enabled = !!(config.tls.pfx || (config.tls.cert && config.tls.key));
+// 默认端口：启用 HTTPS 时 8443（客户端内置的 https://neonhost.top:8443），否则 3000
+config.port = Number(pick('CHAT_PORT', 'port', config.tls.enabled ? 8443 : 3000));
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(path.join(config.dataDir, 'media'), { recursive: true });

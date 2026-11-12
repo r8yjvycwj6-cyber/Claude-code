@@ -6,11 +6,30 @@ export class ApiError extends Error {
   }
 }
 
+// 规范化服务器地址。支持：
+//   neonhost.top:8443              → https://neonhost.top:8443
+//   https://neonhost.top:8443/     → https://neonhost.top:8443
+//   240e:3b4::1                    → https://[240e:3b4::1]      （裸 IPv6 地址自动加方括号）
+//   [240e:3b4::1]:8443             → https://[240e:3b4::1]:8443
+//   http://192.168.1.10:3000       → http://192.168.1.10:3000  （明确写 http:// 才用不加密连接）
 export function normalizeServer(input) {
-  let s = String(input || '').trim().replace(/\/+$/, '');
+  let s = String(input || '').trim();
   if (!s) return '';
-  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
-  const u = new URL(s);
+  let scheme = 'https://';
+  const m = s.match(/^(https?):\/\//i);
+  if (m) {
+    scheme = `${m[1].toLowerCase()}://`;
+    s = s.slice(m[0].length);
+  }
+  s = s.replace(/\/.*$/, '');
+  // 没有方括号、却有两个以上冒号 → 裸 IPv6 地址（此时无法再带端口）
+  if (!s.startsWith('[') && (s.match(/:/g) || []).length >= 2) s = `[${s}]`;
+  let u;
+  try {
+    u = new URL(scheme + s);
+  } catch {
+    throw new Error('服务器地址格式不正确');
+  }
   return u.origin;
 }
 

@@ -19,7 +19,8 @@ async function newUser(browser, s, { phone, name, dark = false }) {
     if (m.type() === 'error') errors.push(`[${name}] console: ${m.text()}`);
   });
   await page.goto(s.app);
-  await page.fill('input[name=server]', s.api);
+  if (await page.isVisible('.server-line')) await page.click('.server-line button');
+    await page.fill('input[name=server]', s.api);
   await page.click('.tabs button:nth-child(2)');
   await page.fill('input[name=phone]', phone);
   await page.fill('input[name=name]', name);
@@ -53,11 +54,22 @@ async function send(u, text) {
   const browser = await chromium.launch();
   try {
     const alice = await newUser(browser, s, { phone: '+8613800000001', name: 'Alice 王' });
-    if (shotDir) {
-      // 登录页截图（新开一个页面）
+    {
+      // 全新的客户端：登录页默认显示内置服务器 neonhost.top:8443
       const p = await alice.ctx.browser().newPage({ viewport: { width: 1280, height: 800 } });
       await p.goto(s.app);
       await p.waitForSelector('.login-card');
+      assert.match(await p.textContent('.server-line'), /服务器：neonhost\.top:8443/);
+      assert.equal(await p.isVisible('input[name=server]'), false);
+      // 服务器地址解析：域名、IPv4、IPv6
+      const norm = await p.evaluate(async () => {
+        const { normalizeServer } = await import('./js/api.js');
+        return ['neonhost.top:8443', 'https://neonhost.top:8443/', '240e:3b4::1', '[240e:3b4::1]:8443',
+          'http://192.168.1.10:3000', 'https://[2001:db8::1]:8443/api'].map(normalizeServer);
+      });
+      assert.deepEqual(norm, ['https://neonhost.top:8443', 'https://neonhost.top:8443', 'https://[240e:3b4::1]',
+        'https://[240e:3b4::1]:8443', 'http://192.168.1.10:3000', 'https://[2001:db8::1]:8443']);
+      await p.waitForTimeout(600);
       await shot(p, '01-login');
       await p.close();
     }
@@ -194,8 +206,8 @@ async function send(u, text) {
     await alice.page.waitForTimeout(300);
     await shot(alice.page, '06-settings');
     await alice.page.keyboard.press('Escape');
-    await alice.page.click('.conv-header .who');
-    await alice.page.waitForTimeout(200);
+    if (!(await alice.page.isVisible('.info-panel.open'))) await alice.page.click('.conv-header .who');
+    await alice.page.waitForTimeout(450);
     await shot(alice.page, '07-group-info');
 
     // 刷新页面后会话和聊天记录还在（本地加密数据库）

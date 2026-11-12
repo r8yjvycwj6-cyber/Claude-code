@@ -5,7 +5,8 @@
 // 服务器只转发 "envelope"（端到端加密后的密文对象），从不解析其中内容。
 // 详细协议见 README.md。
 const { WebSocketServer } = require('ws');
-const { now, isId, rateLimiter } = require('./util');
+const { now, isId, rateLimiter, clientKey } = require('./util');
+const { tx } = require('./db');
 
 const MAX_ENVELOPE_BYTES = 256 * 1024;
 const TYPING_STATES = new Set(['composing', 'recording', 'paused']);
@@ -20,7 +21,9 @@ function validEnvelope(env) {
 }
 
 function attachWebSocket(server, { db, auth, hub }) {
-  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4 * 1024 * 1024 });
+  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4 * 1024 * 1024, perMessageDeflate: false });
+  // ws 会把 HTTP 服务器的监听错误（如端口占用、不支持 IPv6）转发到这里；由 server.js 统一处理，这里不能让它变成未捕获异常
+  wss.on('error', () => {});
   const limit = rateLimiter({ windowMs: 10_000, limit: 300 });
   const watchers = new Map(); // userId -> Set<ws>，订阅了该用户在线状态的连接
 
@@ -92,12 +95,15 @@ function attachWebSocket(server, { db, auth, hub }) {
         }
         if (!validEnvelope(env)) return error(ws, m.id, `给 ${uid} 的 envelope 无效或过大`);
       }
-      for (const uid of members) {
-        const env = m.envelopes[uid];
-        if (env && !isBlocked.get(uid, me)) {
-          hub.deliver(uid, 'message', { id: m.id, from: me, groupId: m.groupId, envelope: env });
+      // 整个群的投递放在一个事务里，只提交一次
+      tx(db, () => {
+        for (const uid of members) {
+          const env = m.envelopes[uid];
+          if (env && !isBlocked.get(uid, me)) {
+            hub.deliver(uid, 'message', { id: m.id, from: me, groupId: m.groupId, envelope: env });
+          }
         }
-      }
+      });
       // missing：群里有但你没给加密副本的成员（例如刚入群），客户端应补发
       reply(ws, { type: 'sent', id: m.id, groupId: m.groupId, ts: now(), missing });
     },
@@ -106,21 +112,23 @@ function attachWebSocket(server, { db, auth, hub }) {
     ack(ws, me, m) {
       if (!Array.isArray(m.qids)) return;
       const receipts = new Map(); // "from|groupId" -> msgIds
-      for (const qid of m.qids.slice(0, 1000)) {
-        if (!isId(qid)) continue;
-        const row = hub.ack(me, qid);
-        if (row && row.kind === 'message') {
-          const key = `${row.payload.from}|${row.payload.groupId || ''}`;
-          if (!receipts.has(key)) receipts.set(key, []);
-          receipts.get(key).push(row.payload.id);
+      tx(db, () => {
+        for (const qid of m.qids.slice(0, 1000)) {
+          if (!isId(qid)) continue;
+          const row = hub.ack(me, qid);
+          if (row && row.kind === 'message') {
+            const key = `${row.payload.from}|${row.payload.groupId || ''}`;
+            if (!receipts.has(key)) receipts.set(key, []);
+            receipts.get(key).push(row.payload.id);
+          }
         }
-      }
-      for (const [key, msgIds] of receipts) {
-        const [from, groupId] = key.split('|');
-        hub.deliver(Number(from), 'receipt', {
-          status: 'delivered', from: me, msgIds, ...(groupId ? { groupId: Number(groupId) } : {}),
-        });
-      }
+        for (const [key, msgIds] of receipts) {
+          const [from, groupId] = key.split('|');
+          hub.deliver(Number(from), 'receipt', {
+            status: 'delivered', from: me, msgIds, ...(groupId ? { groupId: Number(groupId) } : {}),
+          });
+        }
+      });
     },
 
     // 已读回执：{ type:'read', to, msgIds:[...], groupId? }

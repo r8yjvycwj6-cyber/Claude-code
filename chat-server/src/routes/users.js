@@ -3,7 +3,7 @@ const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { HttpError, now, normalizePhone, cleanText, isId } = require('../util');
+const { HttpError, now, normalizePhone, cleanText, isId, ah } = require('../util');
 
 function publicUser(u, self = false) {
   if (!u) return null;
@@ -45,23 +45,20 @@ function usersRoutes({ db, auth, hub, config }) {
     res.json(publicUser(byId.get(req.userId), true));
   });
 
-  r.post('/me/password', (req, res) => {
+  r.post('/me/password', ah(async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     const me = byId.get(req.userId);
-    if (typeof oldPassword !== 'string' || !auth.verifyPassword(oldPassword, me.pass_hash)) {
+    if (typeof oldPassword !== 'string' || !(await auth.verifyPassword(oldPassword, me.pass_hash))) {
       throw new HttpError(401, '原密码错误');
     }
     if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 128) {
       throw new HttpError(400, '新密码长度需要 8~128 位');
     }
-    db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(auth.hashPassword(newPassword), req.userId);
+    db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(await auth.hashPassword(newPassword), req.userId);
     // 其它设备上的登录全部失效，保留当前这个
-    db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(
-      req.userId,
-      crypto.createHash('sha256').update(req.token).digest('hex')
-    );
+    auth.revokeUser(req.userId, req.token);
     res.json({ ok: true });
-  });
+  }));
 
   // 头像（与 WhatsApp 一样，头像不做端到端加密）。请求体直接是图片二进制，Content-Type 为图片类型。
   r.put('/me/avatar', express.raw({ type: Object.keys(AVATAR_TYPES), limit: '2mb' }), (req, res) => {
@@ -83,16 +80,17 @@ function usersRoutes({ db, auth, hub, config }) {
   });
 
   // 注销账号：删除所有数据（公钥、离线消息、群成员关系等通过外键级联删除）
-  r.delete('/me', (req, res) => {
+  r.delete('/me', ah(async (req, res) => {
     const me = byId.get(req.userId);
-    if (typeof req.body.password !== 'string' || !auth.verifyPassword(req.body.password, me.pass_hash)) {
+    if (typeof req.body.password !== 'string' || !(await auth.verifyPassword(req.body.password, me.pass_hash))) {
       throw new HttpError(401, '密码错误');
     }
     hub.closeUser(req.userId);
+    auth.revokeUser(req.userId);
     if (me.avatar) fs.rm(path.join(config.dataDir, 'avatars', me.avatar), { force: true }, () => {});
     db.prepare('DELETE FROM users WHERE id = ?').run(req.userId);
     res.json({ ok: true });
-  });
+  }));
 
   // ---- 查找用户 ----
   // GET /api/users?phone=+8613800000000 精确查找（不提供模糊搜索，防止枚举用户）

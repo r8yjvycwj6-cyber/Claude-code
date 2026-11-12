@@ -1,5 +1,7 @@
 /* SecureChat —— WhatsApp 风格界面。颜色都定义为变量，深色主题只需覆盖变量。 */
 :root {
+  --ease-out: cubic-bezier(.22, .8, .24, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --accent: #00a884;
   --accent-strong: #008069;
   --accent-soft: #d9fdd3;
@@ -174,7 +176,7 @@ button { cursor: pointer; }
 .login-form .btn { width: 100%; padding: 12px; margin-top: 6px; }
 
 /* ---------- 主布局 ---------- */
-.layout { display: flex; height: 100%; background: var(--panel); }
+.layout { display: flex; height: 100%; background: var(--panel); position: relative; overflow: hidden; animation: fadeIn .3s ease both; }
 .rail {
   width: 64px; flex: none; background: var(--panel-2); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 6px;
@@ -389,12 +391,19 @@ button { cursor: pointer; }
 .scroll-down {
   position: absolute; right: 22px; bottom: 80px; width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--panel);
   color: var(--icon); box-shadow: 0 1px 3px rgba(11,20,26,.3); display: flex; align-items: center; justify-content: center; z-index: 3;
+  opacity: 0; transform: translateY(10px) scale(.7); pointer-events: none;
+  transition: opacity .2s ease, transform .25s var(--ease-spring);
 }
+.scroll-down.show { opacity: 1; transform: none; pointer-events: auto; }
 .scroll-down .sd-badge { position: absolute; top: -6px; right: -4px; background: var(--badge); color: #fff; font-size: 11px; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
 
 /* 输入区 */
 .composer-wrap { flex: none; background: var(--panel-2); position: relative; z-index: 2; }
-.reply-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px 0 70px; }
+.reply-bar { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .24s var(--ease-out); }
+.reply-bar.open { grid-template-rows: 1fr; }
+.reply-bar .rb-inner { overflow: hidden; min-height: 0; }
+.reply-bar .rb-row { display: flex; align-items: center; gap: 10px; padding: 8px 16px 0 70px; opacity: 0; transform: translateY(8px); transition: opacity .2s ease, transform .24s var(--ease-out); }
+.reply-bar.open .rb-row { opacity: 1; transform: none; }
 .reply-bar .quote { flex: 1; margin: 0; background: var(--panel); cursor: default; }
 .composer { display: flex; align-items: flex-end; gap: 6px; padding: 7px 16px 8px 10px; min-height: 62px; }
 .composer .input-box { flex: 1; background: var(--input-bg); border-radius: 8px; padding: 9px 12px; display: flex; align-items: center; min-height: 42px; margin: 0 4px; }
@@ -408,7 +417,22 @@ button { cursor: pointer; }
 }
 
 /* ---------- 右侧信息面板 ---------- */
-.info-panel { width: 30%; min-width: 300px; max-width: 420px; flex: none; background: var(--panel-2); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+.info-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; width: clamp(320px, 30%, 420px);
+  background: var(--panel-2); border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  box-shadow: -6px 0 24px rgba(11, 20, 26, .12);
+  transform: translateX(105%); visibility: hidden;
+  transition: transform .32s var(--ease-out), visibility 0s linear .32s;
+  will-change: transform;
+}
+.info-panel.open { transform: none; visibility: visible; transition: transform .32s var(--ease-out), visibility 0s; }
+.info-panel .panel-body { overscroll-behavior: contain; }
+/* 宽屏：信息面板把聊天区推开（与面板同步动画）；窄屏：浮在聊天区上方 */
+@media (min-width: 1001px) {
+  .conversation { transition: margin-right .32s var(--ease-out); }
+  .layout.info-open .conversation { margin-right: clamp(320px, 30%, 420px); }
+  .layout.info-open .info-panel { box-shadow: none; }
+}
 .info-panel .panel-header { background: var(--panel-2); }
 .info-panel .panel-body > div { margin-bottom: 10px; }
 .info-hero { background: var(--panel); padding: 28px 30px 20px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
@@ -468,7 +492,140 @@ button { cursor: pointer; }
 .toast { background: #323739; color: #fff; padding: 12px 22px; border-radius: 6px; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,.25); animation: pop .15s; max-width: 520px; text-align: center; }
 
 @media (max-width: 1000px) {
-  .info-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 8; box-shadow: -4px 0 12px rgba(0,0,0,.15); }
-  .layout { position: relative; }
   .login-card { grid-template-columns: 1fr; padding: 36px 32px; gap: 24px; }
+}
+
+
+/* ======================================================================
+   动画与交互反馈
+   只对 transform / opacity 做动画（由 GPU 合成，不触发重新排版），保证 60fps 流畅。
+   ====================================================================== */
+@keyframes fadeIn { from { opacity: 0; } }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+@keyframes popIn { from { opacity: 0; transform: scale(.94); } }
+@keyframes popOut { to { opacity: 0; transform: scale(.95); } }
+.fade-in { animation: fadeIn .2s ease both; }
+
+/* 按钮按下的回弹 */
+.icon-btn { transition: background-color .15s ease, color .2s ease, transform .12s ease; }
+.icon-btn:active { transform: scale(.9); }
+.btn { transition: background-color .15s ease, transform .12s ease, opacity .2s; }
+.btn:active:not(:disabled) { transform: scale(.97); }
+.chip { transition: background-color .2s ease, color .2s ease, transform .12s ease; }
+.chip:active { transform: scale(.95); }
+.list-item, .settings-item, .menu button { transition: background-color .15s ease; }
+.link { transition: opacity .15s; }
+
+/* 登录页 */
+.login-card { animation: rise .5s var(--ease-out) both; }
+.login-brand { animation: fadeIn .5s ease both; }
+.server-line { display: flex; gap: 8px; align-items: center; color: var(--text-2); font-size: 13px; margin: -6px 0 16px; }
+.server-line.collapsed { display: none; }
+.server-field { transition: opacity .2s ease; }
+.server-field.collapsed { display: none; }
+.server-field:not(.collapsed) { animation: rise .25s var(--ease-out) both; }
+
+/* 会话列表：悬停、选中、重新排序（FLIP）、新会话、未读角标 */
+.chat-item { transition: background-color .15s ease, transform .32s var(--ease-out); }
+.chat-item.enter { animation: rise .3s var(--ease-out) both; }
+.chat-item .badge { transition: transform .2s; }
+.chat-item .badge.pop { animation: badgePop .45s var(--ease-spring); }
+@keyframes badgePop { 0% { transform: scale(.3); } 100% { transform: scale(1); } }
+
+/* 切换聊天时淡入 */
+.messages.fade-in { animation: convIn .24s var(--ease-out) both; }
+@keyframes convIn { from { opacity: 0; transform: translateY(6px); } }
+.messages { overscroll-behavior: contain; }
+
+/* 新消息：从气泡尾巴一侧弹出 */
+.msg-row.enter .bubble { animation: msgIn .28s var(--ease-out) both; }
+.msg-row.enter.out .bubble { transform-origin: 100% 100%; }
+.msg-row.enter.in .bubble { transform-origin: 0 100%; }
+@keyframes msgIn { from { opacity: 0; transform: translateY(12px) scale(.94); } }
+.sys-msg { animation: fadeIn .25s ease both; }
+
+/* 勾号状态变化：✓ → ✓✓ → 蓝色 */
+.tick { transition: color .35s ease; }
+.tick-pop { animation: tickPop .4s var(--ease-spring); }
+@keyframes tickPop { 0% { transform: scale(.4); opacity: .3; } 100% { transform: scale(1); opacity: 1; } }
+
+/* 正在输入的三个跳动的点 */
+.typing-dots { display: inline-flex; gap: 2.5px; margin-left: 4px; vertical-align: middle; height: 10px; align-items: center; }
+.typing-dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: typingDot 1.2s infinite ease-in-out; }
+.typing-dots i:nth-child(2) { animation-delay: .15s; }
+.typing-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes typingDot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-3px); opacity: 1; } }
+
+/* 消息菜单按钮 */
+.msg-menu-btn { transition: opacity .15s ease; }
+
+/* 图片：模糊缩略图 → 清晰原图 */
+.media-img img { transition: filter .4s ease, transform .4s var(--ease-out); }
+.media-img:hover img:not(.blur) { transform: scale(1.015); }
+.media-img .media-loading span { animation: fadeIn .2s ease; }
+
+/* 发送按钮：有内容时变成主题色并弹一下 */
+.composer .send-btn { opacity: .55; transition: color .2s ease, opacity .2s ease, transform .12s ease; }
+.composer .send-btn.ready { color: var(--accent); opacity: 1; }
+.composer .send-btn.ready .icon { animation: sendReady .35s var(--ease-spring); }
+@keyframes sendReady { from { transform: scale(.6) rotate(-20deg); } }
+.composer .input-box { transition: box-shadow .2s ease; }
+.composer .input-box:focus-within { box-shadow: 0 0 0 1px rgba(0, 168, 132, .25); }
+
+/* 表情面板 */
+.emoji-pop { animation: emojiIn .24s var(--ease-out) both; transform-origin: 0 100%; }
+.emoji-pop.leaving { animation: emojiOut .14s ease forwards; }
+@keyframes emojiIn { from { opacity: 0; transform: translateY(12px) scale(.96); } }
+@keyframes emojiOut { to { opacity: 0; transform: translateY(8px) scale(.97); } }
+.emoji-grid button { transition: background-color .12s ease, transform .12s ease; }
+.emoji-grid button:hover { transform: scale(1.18); }
+.emoji-grid button:active { transform: scale(.9); }
+
+/* 菜单 */
+.menu { animation: popIn .16s var(--ease-out) both; }
+.menu.leaving { animation: popOut .12s ease forwards; pointer-events: none; }
+
+/* 弹窗 */
+.modal-backdrop { animation: fadeIn .2s ease both; }
+.modal { animation: modalIn .28s var(--ease-out) both; }
+@keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.96); } }
+.modal-backdrop.leaving { animation: fadeOut .18s ease forwards; pointer-events: none; }
+.modal-backdrop.leaving .modal { animation: modalOut .18s ease forwards; }
+@keyframes modalOut { to { opacity: 0; transform: translateY(8px) scale(.97); } }
+.safety-number span { animation: rise .35s var(--ease-out) both; }
+
+/* 图片查看器 */
+.viewer { animation: fadeIn .2s ease both; }
+.viewer .viewer-img img { animation: zoomIn .3s var(--ease-out) both; }
+@keyframes zoomIn { from { opacity: 0; transform: scale(.92); } }
+.viewer.leaving { animation: fadeOut .18s ease forwards; }
+
+/* 提示 */
+.toast { animation: toastIn .3s var(--ease-spring) both; }
+.toast.leaving { animation: toastOut .2s ease forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(16px) scale(.96); } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(8px); } }
+
+/* 侧边面板、开关、拖拽 */
+.side-panel .panel-body > * { animation: rise .32s var(--ease-out) both; }
+.side-panel .panel-body > *:nth-child(2) { animation-delay: .03s; }
+.side-panel .panel-body > *:nth-child(3) { animation-delay: .06s; }
+.side-panel .panel-body > *:nth-child(n+4) { animation-delay: .09s; }
+.fab { animation: fabIn .3s var(--ease-spring) both; transition: background-color .15s, transform .12s; }
+@keyframes fabIn { from { opacity: 0; transform: translateX(-50%) scale(.5); } }
+.fab:active { transform: translateX(-50%) scale(.92); }
+.fab.hidden { display: flex !important; opacity: 0; transform: translateX(-50%) scale(.5); pointer-events: none; transition: opacity .15s, transform .2s; }
+.switch, .switch::after { transition: background-color .2s ease, left .22s var(--ease-out), opacity .2s; }
+.drop-zone { animation: fadeIn .15s ease both; }
+.conn-banner { animation: rise .25s var(--ease-out) both; }
+.list-item .check { transition: background-color .15s ease, border-color .15s ease; }
+.list-item .check .icon { animation: popIn .2s var(--ease-spring); }
+
+/* 用户在系统里关闭了动画效果时，尊重设置 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important;
+  }
 }

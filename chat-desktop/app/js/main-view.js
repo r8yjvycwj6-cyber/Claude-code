@@ -1,7 +1,7 @@
 // 主界面：左侧导航栏 + 会话列表 + 聊天窗口 + 右侧信息面板
 import {
   h, add, iconBtn, toast, showMenu, closeMenu, showModal, confirmDialog, formDialog, hhmm, listTime, dayLabel, sameDay,
-  lastSeenText, formatSize, linkify, isOnlyEmoji, colorFor, avatarEl, pickFile, saveBlobAs,
+  lastSeenText, formatSize, linkify, isOnlyEmoji, colorFor, avatarEl, pickFile, saveBlobAs, animateOut, reducedMotion,
 } from './dom.js';
 import { icon, ticks } from './icons.js';
 import { EMOJI } from './emoji.js';
@@ -9,6 +9,14 @@ import { previewOf } from './core.js';
 import { setBadge, notify, secureInfo, isDesktop } from './platform.js';
 
 const PAGE = 60;
+
+// 两条消息除发送状态外是否相同
+function sameContent(a, b) {
+  return a.type === b.type && a.body === b.body && a.caption === b.caption && a.media?.id === b.media?.id && a.replyTo?.id === b.replyTo?.id;
+}
+
+// "正在输入"后面跳动的三个点
+const typingDots = () => h('span', { class: 'typing-dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
 
 export function applyTheme(pref) {
   const mq = matchMedia('(prefers-color-scheme: dark)');
@@ -61,8 +69,9 @@ export class MainView {
     this.rail = h('nav', { class: 'rail' });
     this.sidebar = h('aside', { class: 'sidebar' });
     this.conv = h('main', { class: 'conversation' });
-    this.info = h('aside', { class: 'info-panel hidden' });
-    this.root.replaceChildren(h('div', { class: 'layout' }, this.rail, this.sidebar, this.conv, this.info));
+    this.info = h('aside', { class: 'info-panel', 'aria-hidden': 'true' });
+    this.layoutEl = h('div', { class: 'layout' }, this.rail, this.sidebar, this.conv, this.info);
+    this.root.replaceChildren(this.layoutEl);
     this.renderRail();
     this.renderSidebar();
     this.renderEmpty();
@@ -218,49 +227,117 @@ export class MainView {
   typingText(chatId) {
     const t = this.typing.get(chatId);
     if (!t) return null;
-    const verb = t.state === 'recording' ? '正在录音…' : '正在输入…';
+    const verb = t.state === 'recording' ? '正在录音' : '正在输入';
     return chatId.startsWith('g:') ? `${this.core.displayName(t.from)} ${verb}` : verb;
   }
 
+  // 会话列表：按 id 复用 DOM 节点，只重建内容变化的行；顺序变化时用 FLIP 动画平滑移动
   renderChatList() {
     const q = this.search;
     let chats = this.core.sortedChats();
     if (this.filter === 'unread') chats = chats.filter((c) => c.unread);
     if (this.filter === 'groups') chats = chats.filter((c) => c.type === 'group');
     if (q) chats = chats.filter((c) => this.core.chatTitle(c).toLowerCase().includes(q) || (c.lastMsg?.text || '').toLowerCase().includes(q));
-    const items = chats.map((chat) => {
-      const last = chat.lastMsg;
-      const typing = this.typingText(chat.id);
-      let preview;
-      if (typing) preview = h('div', { class: 'preview typing' }, typing);
-      else {
-        const prefix = last && chat.type === 'group' && !last.mine && last.type !== 'system' && last.from ? `${this.core.displayName(last.from)}: ` : '';
-        preview = h('div', { class: 'preview' },
-          last?.mine && last.type !== 'deleted' ? ticks(last.status || 'sent') : null,
-          h('span', { class: 'ptext' }, last ? prefix + last.text : chat.type === 'group' ? '群组已创建' : '开始聊天吧')
-        );
-      }
-      return h('div', {
-        class: `chat-item ${chat.id === this.current ? 'active' : ''} ${chat.unread ? 'unread' : ''}`,
-        dataset: { chat: chat.id },
-        onClick: () => this.openChat(chat.id),
-        onContextmenu: (e) => {
-          e.preventDefault();
-          this.chatContextMenu(chat, { x: e.clientX, y: e.clientY });
-        },
-      },
-        this.chatAvatar(chat),
-        h('div', { class: 'body' },
-          h('div', { class: 'row' }, h('div', { class: 'name' }, this.core.chatTitle(chat)), h('div', { class: 'time' }, listTime(last?.ts || chat.updatedAt))),
-          h('div', { class: 'row' }, preview, chat.unread ? h('div', { class: 'badge' }, chat.unread) : null)
-        )
-      );
-    });
-    if (!items.length) {
-      items.push(h('div', { class: 'list-empty' },
+    this.chatEls = this.chatEls || new Map();
+
+    if (!chats.length) {
+      this.chatEls.clear();
+      this.listEl.replaceChildren(h('div', { class: 'list-empty fade-in' },
         q || this.filter !== 'all' ? '没有找到聊天' : h('span', {}, '还没有聊天。', h('br'), h('button', { class: 'link', onClick: () => this.panelNewChat() }, '开始新的聊天'))));
+      return;
     }
-    this.listEl.replaceChildren(...items);
+    this.listEl.querySelector(':scope > .list-empty')?.remove();
+
+    // FLIP 第一步：记录旧位置
+    const animate = !reducedMotion() && this.listEl.isConnected && chats.length <= 300;
+    const oldTops = new Map();
+    if (animate) for (const [id, rec] of this.chatEls) if (rec.el.isConnected) oldTops.set(id, rec.el.getBoundingClientRect().top);
+
+    const next = new Map();
+    const els = chats.map((chat) => {
+      const sig = this.chatSig(chat);
+      const prev = this.chatEls.get(chat.id);
+      let el;
+      if (prev && prev.sig === sig) el = prev.el;
+      else {
+        el = this.chatItemEl(chat);
+        if (prev) {
+          prev.el.replaceWith(el);
+          if ((chat.unread || 0) > (prev.unread || 0)) el.querySelector('.badge')?.classList.add('pop');
+        } else if (animate && this.chatEls.size) el.classList.add('enter');
+      }
+      el.classList.toggle('active', chat.id === this.current);
+      next.set(chat.id, { el, sig, unread: chat.unread || 0 });
+      return el;
+    });
+    // 移除不再显示的行
+    for (const [id, rec] of this.chatEls) if (!next.has(id)) rec.el.remove();
+    // 按新顺序排列（只移动需要移动的节点，不打乱滚动位置）
+    els.forEach((el, i) => {
+      if (this.listEl.children[i] !== el) this.listEl.insertBefore(el, this.listEl.children[i] || null);
+    });
+    while (this.listEl.children.length > els.length) this.listEl.lastChild.remove();
+    this.chatEls = next;
+
+    // FLIP 第二步：从旧位置平滑移动到新位置
+    if (animate && oldTops.size) {
+      const moved = [];
+      for (const [id, rec] of next) {
+        const before = oldTops.get(id);
+        if (before === undefined) continue;
+        const dy = before - rec.el.getBoundingClientRect().top;
+        if (Math.abs(dy) < 1) continue;
+        rec.el.style.transition = 'none';
+        rec.el.style.transform = `translateY(${dy}px)`;
+        moved.push(rec.el);
+      }
+      if (moved.length) {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          for (const el of moved) {
+            el.style.transition = '';
+            el.style.transform = '';
+          }
+        }));
+      }
+    }
+  }
+
+  chatSig(chat) {
+    const last = chat.lastMsg;
+    const u = chat.type === 'direct' ? this.core.users.get(chat.peerId) : null;
+    return JSON.stringify([
+      this.core.chatTitle(chat), last?.id, last?.ts, last?.text, last?.status, last?.from, chat.unread || 0,
+      this.typingText(chat.id), u?.avatar, chat.updatedAt, chat.left,
+    ]);
+  }
+
+  chatItemEl(chat) {
+    const last = chat.lastMsg;
+    const typing = this.typingText(chat.id);
+    let preview;
+    if (typing) preview = h('div', { class: 'preview typing' }, typing, typingDots());
+    else {
+      const prefix = last && chat.type === 'group' && !last.mine && last.type !== 'system' && last.from ? `${this.core.displayName(last.from)}: ` : '';
+      preview = h('div', { class: 'preview' },
+        last?.mine && last.type !== 'deleted' ? ticks(last.status || 'sent') : null,
+        h('span', { class: 'ptext' }, last ? prefix + last.text : chat.type === 'group' ? '群组已创建' : '开始聊天吧')
+      );
+    }
+    return h('div', {
+      class: `chat-item ${chat.unread ? 'unread' : ''}`,
+      dataset: { chat: chat.id },
+      onClick: () => this.openChat(chat.id),
+      onContextmenu: (e) => {
+        e.preventDefault();
+        this.chatContextMenu(chat, { x: e.clientX, y: e.clientY });
+      },
+    },
+      this.chatAvatar(chat),
+      h('div', { class: 'body' },
+        h('div', { class: 'row' }, h('div', { class: 'name' }, this.core.chatTitle(chat)), h('div', { class: 'time' }, listTime(last?.ts || chat.updatedAt))),
+        h('div', { class: 'row' }, preview, chat.unread ? h('div', { class: 'badge' }, chat.unread) : null)
+      )
+    );
   }
 
   chatContextMenu(chat, at) {
@@ -319,8 +396,8 @@ export class MainView {
 
   renderConversation() {
     this.header = h('header', { class: 'conv-header' });
-    this.msgList = h('div', { class: 'messages', onScroll: () => this.onScroll() });
-    this.scrollBtn = h('button', { class: 'scroll-down hidden', title: '滚动到底部', onClick: () => this.scrollToBottom(true) }, icon('chevron'));
+    this.msgList = h('div', { class: 'messages fade-in', onScroll: () => this.onScroll() });
+    this.scrollBtn = h('button', { class: 'scroll-down', title: '滚动到底部', onClick: () => this.scrollToBottom(true) }, icon('chevron'));
     this.composerWrap = h('div', { class: 'composer-wrap' });
     this.conv.replaceChildren(this.header, this.msgList, this.scrollBtn, this.composerWrap);
     this.renderHeader();
@@ -351,7 +428,7 @@ export class MainView {
       h('div', { style: { cursor: 'pointer' }, onClick: () => this.toggleInfo() }, this.chatAvatar(chat, 40)),
       h('div', { class: 'who', onClick: () => this.toggleInfo() },
         h('div', { class: 'title' }, this.core.chatTitle(chat)),
-        sub ? h('div', { class: `subtitle ${typing ? 'typing' : ''}` }, sub) : null
+        sub ? h('div', { class: `subtitle ${typing ? 'typing' : ''}` }, sub, typing ? typingDots() : null) : null
       ),
       menuBtn
     );
@@ -409,8 +486,21 @@ export class MainView {
   upsertMessage(msg) {
     const idx = this.msgs.findIndex((m) => m.id === msg.id);
     if (idx >= 0) {
+      const before = this.msgs[idx];
       this.msgs[idx] = msg;
       const old = this.msgNodes.get(msg.id);
+      // 只有发送状态变了（✓ → ✓✓ → 蓝色）：原地替换勾号并播放一个小动画，不重建整条消息
+      if (old && sameContent(before, msg)) {
+        if ((before.status || 'sent') !== (msg.status || 'sent')) {
+          const tick = old.querySelector('.meta .tick');
+          if (tick) {
+            const t = ticks(msg.status || 'sent');
+            t.classList.add('tick-pop');
+            tick.replaceWith(t);
+          }
+        }
+        return;
+      }
       const node = this.msgNode(msg, this.msgs[idx - 1] || null);
       this.msgNodes.set(msg.id, node);
       old?.replaceWith(node);
@@ -427,6 +517,7 @@ export class MainView {
     this.msgs.push(msg);
     if (!last || !sameDay(last.ts, msg.ts)) this.msgList.append(h('div', { class: 'day-sep' }, h('span', {}, dayLabel(msg.ts))));
     const node = this.msgNode(msg, last || null);
+    node.classList.add('enter'); // 新消息入场动画
     this.msgNodes.set(msg.id, node);
     this.msgList.append(node);
     if (msg.mine || nearBottom) this.scrollToBottom(true);
@@ -539,7 +630,7 @@ export class MainView {
       return;
     }
     const close = () => {
-      v.remove();
+      animateOut(v, 180);
       document.removeEventListener('keydown', onKey, true);
     };
     const onKey = (e) => {
@@ -559,6 +650,7 @@ export class MainView {
   }
 
   messageMenu(m, anchor, onClose) {
+    m = this.msgs.find((x) => x.id === m.id) || m; // 状态可能已原地更新过，取最新的
     const canSend = this.core.canSend(m.chatId);
     const items = [
       canSend && m.type !== 'undecryptable' ? { label: '回复', icon: 'reply', onClick: () => this.setReply(m) } : null,
@@ -593,7 +685,7 @@ export class MainView {
   updateScrollBtn() {
     const dist = this.msgList.scrollHeight - this.msgList.scrollTop - this.msgList.clientHeight;
     if (dist < 60) this.newBelow = 0;
-    this.scrollBtn.classList.toggle('hidden', dist < 200 && !this.newBelow);
+    this.scrollBtn.classList.toggle('show', dist >= 200 || !!this.newBelow);
     this.scrollBtn.querySelector('.sd-badge')?.remove();
     if (this.newBelow) this.scrollBtn.append(h('span', { class: 'sd-badge' }, this.newBelow));
   }
@@ -617,7 +709,7 @@ export class MainView {
           : '你已不在此群组中，无法发送消息。'));
       return;
     }
-    this.replyBar = h('div', { class: 'reply-bar hidden' });
+    this.replyBar = h('div', { class: 'reply-bar' });
     const ta = h('textarea', { rows: 1, placeholder: '输入消息', spellcheck: false });
     this.textarea = ta;
     const sendBtn = iconBtn('send', '发送', () => this.sendCurrent(), { class: 'send-btn' });
@@ -628,10 +720,13 @@ export class MainView {
         { label: '文件', icon: 'file', onClick: async () => { const f = await pickFile(); if (f) this.confirmSendFile(f); } },
       ], { align: 'left' })
     );
+    const syncSend = () => sendBtn.classList.toggle('ready', ta.value.trim().length > 0);
+    this.syncSend = syncSend;
     ta.addEventListener('input', () => {
       ta.style.height = 'auto';
       ta.style.height = `${Math.min(120, ta.scrollHeight)}px`;
-      this.onTypingInput();
+      syncSend();
+      if (ta.value) this.onTypingInput();
     });
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && this.core.settings.enterToSend) {
@@ -652,6 +747,7 @@ export class MainView {
     );
     const draft = this.drafts?.get(this.current);
     if (draft) ta.value = draft;
+    syncSend();
     setTimeout(() => ta.focus(), 0);
     ta.addEventListener('blur', () => {
       this.drafts = this.drafts || new Map();
@@ -680,6 +776,7 @@ export class MainView {
     if (!text.trim()) return;
     ta.value = '';
     ta.style.height = 'auto';
+    this.syncSend?.();
     this.drafts?.delete(this.current);
     clearTimeout(this.typingStop);
     this.core.sendTyping(this.current, 'paused');
@@ -697,13 +794,13 @@ export class MainView {
   setReply(m, focus = true) {
     this.replyTo = m;
     if (!this.replyBar) return;
-    this.replyBar.classList.toggle('hidden', !m);
+    this.replyBar.classList.toggle('open', !!m);
     if (m) {
-      this.replyBar.replaceChildren(
+      this.replyBar.replaceChildren(h('div', { class: 'rb-inner' }, h('div', { class: 'rb-row' },
         h('div', { class: 'quote' },
           h('div', { class: 'q-name', style: { color: m.mine ? '#06cf9c' : colorFor(m.from) } }, this.core.displayName(m.from)),
           h('div', { class: 'q-text' }, previewOf(m))),
-        iconBtn('close', '取消回复', () => this.setReply(null)));
+        iconBtn('close', '取消回复', () => this.setReply(null)))));
       if (focus) this.textarea?.focus();
     }
   }
@@ -730,7 +827,7 @@ export class MainView {
   }
   closeEmoji() {
     if (!this.emojiPop) return;
-    this.emojiPop.remove();
+    animateOut(this.emojiPop, 140);
     this.emojiPop = null;
     this.emojiAnchor?.classList.remove('active');
     document.removeEventListener('mousedown', this.emojiOutside, true);
@@ -828,8 +925,10 @@ export class MainView {
   toggleInfo(force) {
     this.infoOpen = force ?? !this.infoOpen;
     if (!this.current) this.infoOpen = false;
-    this.info.classList.toggle('hidden', !this.infoOpen);
     if (this.infoOpen) this.renderInfo();
+    this.info.classList.toggle('open', this.infoOpen);
+    this.layoutEl.classList.toggle('info-open', this.infoOpen);
+    this.info.setAttribute('aria-hidden', String(!this.infoOpen));
   }
 
   renderInfo() {

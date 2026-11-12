@@ -27,6 +27,7 @@ function launch(profile) {
     // 对方用网页版
     const peer = await (await browser.newContext()).newPage();
     await peer.goto(s.app);
+    if (await peer.isVisible('.server-line')) await peer.click('.server-line button');
     await peer.fill('input[name=server]', s.api);
     await peer.click('.tabs button:nth-child(2)');
     await peer.fill('input[name=phone]', '+8613900000009');
@@ -43,6 +44,7 @@ function launch(profile) {
     assert.equal(await win.evaluate(() => typeof globalThis.require), 'undefined', '页面不应能访问 Node.js');
     assert.equal(await win.evaluate(() => globalThis.desktop.isDesktop), true);
 
+    if (await win.isVisible('.server-line')) await win.click('.server-line button');
     await win.fill('input[name=server]', s.api);
     await win.click('.tabs button:nth-child(2)');
     await win.fill('input[name=phone]', '+8613900000008');

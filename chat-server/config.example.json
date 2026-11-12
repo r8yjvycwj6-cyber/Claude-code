@@ -1,12 +1,14 @@
 {
-  "host": "0.0.0.0",
-  "port": 3000,
+  "domain": "neonhost.top",
+  "host": "::",
+  "port": 8443,
   "dataDir": "data",
 
-  "tlsPfx": "",
-  "tlsPassphrase": "",
+  "tlsPfx": "certs/neonhost.top.pfx",
+  "tlsPassphrase": "在这里填写导出 pfx 时设置的密码",
   "tlsCert": "",
   "tlsKey": "",
+  "tlsWatchMs": 30000,
 
   "corsOrigins": "*",
   "trustProxy": "false",

@@ -28,17 +28,29 @@ export function iconBtn(name, title, onClick, extra = {}) {
   return h('button', { class: `icon-btn ${extra.class || ''}`, title, 'aria-label': title, onClick, type: 'button', ...extra.attrs }, icon(name, extra.size || 24));
 }
 
+// ---------------------------------------------------------------- 动画
+export const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// 播放退场动画后再移除元素（动画由 CSS 类 .leaving 定义）
+export function animateOut(el, ms = 160) {
+  if (!el || el._leaving) return;
+  el._leaving = true;
+  if (reducedMotion()) return el.remove();
+  el.classList.add('leaving');
+  setTimeout(() => el.remove(), ms);
+}
+
 // ---------------------------------------------------------------- 提示、菜单、弹窗
 export function toast(text, ms = 3200) {
   const t = h('div', { class: 'toast' }, text);
   document.getElementById('toasts').append(t);
-  setTimeout(() => t.remove(), ms);
+  setTimeout(() => animateOut(t, 200), ms);
 }
 
 let openMenu = null;
 export function closeMenu() {
   if (openMenu) {
-    openMenu.el.remove();
+    animateOut(openMenu.el, 120);
     openMenu.onClose?.();
     openMenu = null;
   }
@@ -74,14 +86,19 @@ export function showMenu(anchor, items, { onClose, align = 'right' } = {}) {
   x = Math.min(Math.max(8, x), innerWidth - mw - 8);
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
+  // 从靠近触发点的角展开
+  el.style.transformOrigin = `${x + mw / 2 < (r.left + r.right) / 2 ? 'right' : 'left'} ${y < r.top ? 'bottom' : 'top'}`;
   openMenu = { el, onClose };
 }
 
 /** actions: [{ label, primary?, danger?, onClick? }]；onClick 返回 false 则不关闭 */
 export function showModal({ title, body, actions = [], onClose, wide }) {
   const backdrop = h('div', { class: 'modal-backdrop' });
+  let closed = false;
   const close = () => {
-    backdrop.remove();
+    if (closed) return;
+    closed = true;
+    animateOut(backdrop, 180);
     document.removeEventListener('keydown', onKey, true);
     onClose?.();
   };

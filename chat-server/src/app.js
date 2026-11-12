@@ -5,10 +5,11 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const express = require('express');
-const { openDb } = require('./db');
+const { openDb, flushBatch } = require('./db');
 const { createAuth } = require('./auth');
 const { createHub } = require('./hub');
 const { attachWebSocket } = require('./ws');
+const { readTlsOptions, watchTls, logCert } = require('./tls');
 const { HttpError, now } = require('./util');
 
 function createChatServer(config) {
@@ -41,7 +42,7 @@ function createChatServer(config) {
     next();
   });
 
-  app.get('/api/health', (_req, res) => res.json({ ok: true, time: now() }));
+  app.get('/api/health', (_req, res) => res.json({ ok: true, time: now(), online: hub.onlineCount() }));
 
   // 媒体上传是原始二进制流，必须在 JSON 解析器之前挂载
   app.use('/api/media', require('./routes/media')(ctx));
@@ -66,15 +67,21 @@ function createChatServer(config) {
     res.status(status).json({ error: status >= 500 ? '服务器内部错误' : err.message });
   });
 
-  const useTls = (config.tls.pfx && fs.existsSync(config.tls.pfx)) || (config.tls.cert && config.tls.key);
-  const server = useTls
-    ? https.createServer(
-        config.tls.pfx
-          ? { pfx: fs.readFileSync(config.tls.pfx), passphrase: config.tls.passphrase || undefined }
-          : { cert: fs.readFileSync(config.tls.cert), key: fs.readFileSync(config.tls.key) },
-        app
-      )
-    : http.createServer(app);
+  const useTls = !!config.tls?.enabled;
+  let unwatchTls = null;
+  let server;
+  if (useTls) {
+    const opts = readTlsOptions(config.tls); // 证书配置了但文件不存在时直接报错，避免悄悄退回 HTTP
+    server = https.createServer({ ...opts, minVersion: 'TLSv1.2' }, app);
+    logCert('已加载 HTTPS 证书', opts);
+    unwatchTls = watchTls(server, config.tls);
+  } else {
+    server = http.createServer(app);
+  }
+  // 超时设置：防止慢速连接占满资源；上传大文件留足时间
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 70_000;
+  server.requestTimeout = 15 * 60_000;
 
   const wss = attachWebSocket(server, ctx);
 
@@ -92,9 +99,11 @@ function createChatServer(config) {
 
   function close() {
     clearInterval(timer);
+    unwatchTls?.();
     for (const ws of wss.clients) ws.terminate();
     wss.close();
     return new Promise((resolve) => server.close(() => {
+      flushBatch(db);
       db.close();
       resolve();
     }));

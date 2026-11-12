@@ -53,4 +53,39 @@ function rateLimiter({ windowMs, limit }) {
   };
 }
 
-module.exports = { HttpError, now, isB64, isB64Len, normalizePhone, cleanText, isId, rateLimiter };
+// 把 IPv6 地址展开成 8 段完整形式
+function expandIPv6(ip) {
+  let [head, tail = null] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail !== null && tail !== '' ? tail.split(':') : [];
+  // 末尾是内嵌 IPv4（如 ::ffff:1.2.3.4）
+  const fix = (arr) => arr.flatMap((p) => {
+    if (!p.includes('.')) return [p];
+    const b = p.split('.').map(Number);
+    return [((b[0] << 8) | b[1]).toString(16), ((b[2] << 8) | b[3]).toString(16)];
+  });
+  const hh = fix(h);
+  const tt = fix(t);
+  const fill = tail === null ? [] : new Array(8 - hh.length - tt.length).fill('0');
+  return [...hh, ...fill, ...tt].map((p) => p.padStart(4, '0').toLowerCase());
+}
+
+// 限流用的客户端标识：IPv4 按单个地址；IPv6 按 /64 网段（一个家庭/设备通常拥有整个 /64，可随意换地址）
+function clientKey(ip) {
+  if (!ip) return 'unknown';
+  let s = String(ip);
+  const zone = s.indexOf('%');
+  if (zone >= 0) s = s.slice(0, zone);
+  if (s.startsWith('::ffff:') && s.includes('.')) return s.slice(7); // IPv4 映射地址
+  if (!s.includes(':')) return s;
+  try {
+    return `${expandIPv6(s).slice(0, 4).join(':')}::/64`;
+  } catch {
+    return s;
+  }
+}
+
+// 并发执行异步处理器时把异常交给 Express 的错误处理
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+module.exports = { HttpError, now, isB64, isB64Len, normalizePhone, cleanText, isId, rateLimiter, clientKey, expandIPv6, ah };
